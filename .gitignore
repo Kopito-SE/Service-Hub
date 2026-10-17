@@ -1,0 +1,33 @@
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Secrets
+.env
+*.env
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+
+# Django
+db.sqlite3
+db.sqlite3-journal
+*.log
+/media/
+/staticfiles/
+
+# Virtualenv
+venv/
+.venv/
+env/
+
+# Stray top-level script (remove this line if you actually want main.py tracked)
+main.py
+
+# OS
+.DS_Store
+Thumbs.db
