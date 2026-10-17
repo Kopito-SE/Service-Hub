@@ -36,34 +36,31 @@ class Business(models.Model):
         return self.name
 
 
-    class StaffMember(models.Model):
+class StaffMember(models.Model):
+    business = models.ForeignKey(
+        Business,
+        on_delete=models.PROTECT,
+        related_name="staff_members"
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="staff_memberships",
+        null=True,
+        blank=True
+    )
+    display_name = models.CharField(max_length=50)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
 
-        business = models.ForeignKey(
-            "businesses.Business",
-            on_delete=models.PROTECT,
-            related_name="staff_members"
-        )
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["business", "user"],
+                condition=models.Q(user__isnull=False),
+                name="unique_business_staff_user"
+            )
+        ]
 
-        user = models.ForeignKey(
-            settings.AUTH_USER_MODEL,
-            on_delete=models.PROTECT,
-            related_name="staff_memberships",
-            null=True,
-            blank=True
-        )
-
-        display_name = models.CharField(max_length=50)
-        is_active = models.BooleanField(default=True)
-        created_at = models.DateTimeField(auto_now_add=True)
-
-        class Meta:
-            constraints = [
-                models.UniqueConstraint(
-                    fields=["business", "user"],
-                    condition=models.Q(user__isnull=False),
-                    name="unique_business_staff_user"
-                )
-            ]
-        def __str__(self):
-            return f"{self.display_name} - {self.business.name}"
-
+    def __str__(self):
+        return f"{self.display_name} - {self.business.name}"
