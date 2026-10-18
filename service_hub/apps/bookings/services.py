@@ -1,11 +1,12 @@
 from datetime import timedelta
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
-from service_hub.apps.businesses.models import Business, StaffMember
-from service_hub.apps.service_catalog.models import Service
+from apps.businesses.models import Business, StaffMember
+from apps.service_catalog.models import Service
 
 from .models import Booking
 
@@ -14,8 +15,6 @@ class BookingService:
 
     @staticmethod
     @transaction.atomic
-
-
     def create_booking(
             *,
             customer,
@@ -49,13 +48,13 @@ class BookingService:
             )
         except Service.DoesNotExist:
             raise ValidationError({
-                "service":(
-                    "Select an active service belonging"
+                "service": (
+                    "Select an active service belonging "
                     "to the selected business."
                 )
             })
-        staff_member = None
 
+        staff_member = None
         if staff_member_id is not None:
             try:
                 staff_member = StaffMember.objects.get(
@@ -66,7 +65,7 @@ class BookingService:
             except StaffMember.DoesNotExist:
                 raise ValidationError({
                     "staff_member": (
-                        "Select an active Staff member"
+                        "Select an active Staff member "
                         "belonging to this business."
                     )
                 })
@@ -75,33 +74,31 @@ class BookingService:
             raise ValidationError({
                 "start_time": "The booking must be in the Future."
             })
+
         end_time = start_time + timedelta(
             minutes=service.duration_minutes
         )
 
-        #Only active reservations block availability.
+        # Only active reservations block availability.
         conflicts = Booking.objects.filter(
             business=business,
             status__in=[
                 Booking.Status.PENDING,
                 Booking.Status.CONFIRMED,
-
             ],
             start_time__lt=end_time,
             end_time__gt=start_time,
-
         )
 
         if staff_member is not None:
-            '''A staff-specific appointment conflicts with bookings for that staff member and unassigned bookings that reserve business-wide capacity.'''
-
+            # A staff-specific appointment conflicts with bookings for that
+            # staff member and unassigned bookings that reserve business-wide capacity.
             conflicts = conflicts.filter(
-                staff_member__in=[staff_member]
-            ) | conflicts.filter(staff_member__isnull=True)
-
+                Q(staff_member=staff_member) | Q(staff_member__isnull=True)
+            )
         else:
-            '''Conservative initial Policy: an Unassigned
-            booking reserves business-wide capacity.'''
+            # Conservative initial Policy: an Unassigned
+            # booking reserves business-wide capacity.
             pass
 
         if conflicts.exists():
@@ -122,9 +119,9 @@ class BookingService:
             price_at_booking=service.price,
             status=Booking.Status.PENDING,
         )
+
     @staticmethod
     @transaction.atomic
-
     def cancel_booking(*, booking):
         booking = (
             Booking.objects
@@ -144,5 +141,3 @@ class BookingService:
         booking.save(update_fields=["status", "updated_at"])
 
         return booking
-
-
