@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.utils import timezone
@@ -132,4 +133,82 @@ class BookingServiceTests(TestCase):
         self.assertEqual(
             cancelled_booking.status,
             Booking.Status.CANCELLED
+        )
+
+
+    def test_service_from_another_business_is_rejected(self):
+        other_business = Business.objects.create(
+            owner=self.customer,
+            name="Another Salon",
+        )
+
+        other_service = Service.objects.create(
+            business=other_business,
+            name="Hair Coloring",
+            price="1500.00",
+            duration_minutes=90,
+        )
+
+        with self.assertRaises(ValidationError):
+            BookingService.create_booking(
+                customer=self.customer,
+                business_id=self.business.pk,
+                service_id=other_service.pk,
+                start_time=self.start_time,
+            )
+
+    def test_staff_from_another_business_is_rejected(self):
+        other_business = Business.objects.create(
+            owner=self.customer,
+            name="Another Salon",
+        )
+
+        other_staff = StaffMember.objects.create(
+            business=other_business,
+            display_name="Jordan",
+        )
+
+        with self.assertRaises(ValidationError):
+            BookingService.create_booking(
+                customer=self.customer,
+                business_id=self.business.pk,
+                service_id=self.service.pk,
+                staff_member_id=other_staff.pk,
+                start_time=self.start_time,
+            )
+
+    def test_inactive_service_is_rejected(self):
+        self.service.is_active = False
+        self.service.save(update_fields=["is_active"])
+
+        with self.assertRaises(ValidationError):
+            BookingService.create_booking(
+                customer=self.customer,
+                business_id=self.business.pk,
+                service_id=self.service.pk,
+                start_time=self.start_time,
+            )
+
+    def test_cancelled_booking_does_not_block_slot(self):
+        first_booking = BookingService.create_booking(
+            customer=self.customer,
+            business_id=self.business.pk,
+            service_id=self.service.pk,
+            staff_member_id=self.staff_member.pk,
+            start_time=self.start_time,
+        )
+
+        BookingService.cancel_booking(booking=first_booking)
+
+        second_booking = BookingService.create_booking(
+            customer=self.customer,
+            business_id=self.business.pk,
+            service_id=self.service.pk,
+            staff_member_id=self.staff_member.pk,
+            start_time=self.start_time,
+        )
+
+        self.assertEqual(
+            second_booking.status,
+            Booking.Status.PENDING,
         )
