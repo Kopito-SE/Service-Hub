@@ -11,6 +11,8 @@ from apps.service_catalog.models import Service
 from apps.bookings.models import Booking
 from decimal import Decimal
 
+from apps.availability.models import StaffWorkingHours
+
 User=get_user_model()
 
 class BookingAPITests(APITestCase):
@@ -44,6 +46,14 @@ class BookingAPITests(APITestCase):
             display_name="Marcus",
             is_active=True
         )
+
+        for weekday in range(7):
+            StaffWorkingHours.objects.create(
+                staff_member=self.staff_member,
+                weekday=weekday,
+                opening_time="00:00",
+                closing_time="23:59"
+            )
 
         self.client.force_authenticate(user=self.customer)
 

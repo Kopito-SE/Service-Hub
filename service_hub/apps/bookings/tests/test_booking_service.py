@@ -11,6 +11,8 @@ from apps.service_catalog.models import Service
 from apps.bookings.models import Booking
 from apps.bookings.services import BookingService
 from decimal import Decimal
+from apps.availability.models import StaffWorkingHours
+
 
 User = get_user_model()
 
@@ -47,6 +49,13 @@ class BookingServiceTests(TestCase):
 
         #Use a Future, timezone-aware appointment time
         self.start_time = timezone.now() + timedelta(days=2)
+        for weekday in range(7):
+            StaffWorkingHours.objects.create(
+                staff_member=self.staff_member,
+                weekday=weekday,
+                opening_time="00:00",
+                closing_time="23:59"
+            )
 
     def test_customer_can_create_booking(self):
         booking = BookingService.create_booking(
@@ -212,3 +221,35 @@ class BookingServiceTests(TestCase):
             second_booking.status,
             Booking.Status.PENDING,
         )
+    def test_booking_outside_working_hours_is_rejected(self):
+        # Replace the broad test schedule with a 9 AM-% PM schedule
+        StaffWorkingHours.objects.filter(
+            staff_member=self.staff_member,
+        ).delete()
+
+        weekday = timezone.localtime(self.start_time).weekday()
+        StaffWorkingHours.objects.create(
+            staff_member=self.staff_member,
+            weekday=weekday,
+            opening_time="09:00",
+            closing_time="17:00"
+        )
+        local_start = timezone.localtime(self.start_time).replace(
+            hour=18,
+            minute=0,
+            second=0,
+            microsecond=0
+        )
+
+        # Ensure the chosen time remains in the future.
+        if local_start <= timezone.localtime(timezone.now()):
+            local_start += timedelta(days=7)
+
+        with self.assertRaises(ValidationError):
+            BookingService.create_booking(
+                customer=self.customer,
+                business_id=self.business.pk,
+                service_id=self.service.pk,
+                staff_member_id=self.staff_member.pk,
+                start_time=local_start
+            )

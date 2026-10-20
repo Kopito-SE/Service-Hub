@@ -9,6 +9,9 @@ from apps.businesses.models import Business, StaffMember
 from apps.service_catalog.models import Service
 
 from .models import Booking
+from apps.availability.services import AvailabilityService
+
+from apps.availability.services import AvailabilityService
 
 
 class BookingService:
@@ -78,6 +81,14 @@ class BookingService:
         end_time = start_time + timedelta(
             minutes=service.duration_minutes
         )
+
+        # Asks the Availability component to validate the working schedule
+        if staff_member is not None:
+            AvailabilityService.validate_staff_availability(
+                staff_member=staff_member,
+                start_time=start_time,
+                end_time=end_time
+            )
 
         # Only active reservations block availability.
         conflicts = Booking.objects.filter(
