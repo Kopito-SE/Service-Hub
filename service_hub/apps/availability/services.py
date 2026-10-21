@@ -1,8 +1,7 @@
 from rest_framework.exceptions import ValidationError
 from django.utils import timezone
 
-from .models import StaffWorkingHours
-
+from .models import StaffWorkingHours, StaffTimeOff
 class AvailabilityService:
     @staticmethod
     def validate_staff_availability(
@@ -49,5 +48,25 @@ class AvailabilityService:
                 "start_time": (
                     "The Appointment must fit within the staff member's "
                     "working hours."
+                )
+            })
+
+    @staticmethod
+    def validate_no_time_off(
+            *,
+            staff_member,
+            start_time,
+            end_time
+    ):
+        has_conflict = StaffTimeOff.objects.filter(
+            staff_member=staff_member,
+            start_time__lt=end_time,
+            end_time__gt=start_time
+        ).exists()
+
+        if has_conflict:
+            raise ValidationError({
+                "start_time": (
+                    "The staff member is unavailable during this period."
                 )
             })

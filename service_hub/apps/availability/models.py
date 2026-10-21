@@ -45,3 +45,31 @@ class StaffWorkingHours(models.Model):
             f"{self.get_weekday_display()}: "
             f"{self.opening_time}-{self.closing_time}"
         )
+
+class StaffTimeOff(models.Model):
+    staff_member = models.ForeignKey(
+        "businesses.StaffMember",
+        on_delete=models.CASCADE,
+        related_name="time_off_periods",
+    )
+    start_time = models.DateTimeField()
+    end_time=models.DateTimeField()
+    reason = models.CharField(
+        max_length=255,
+        blank=True
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(end_time__gt=F("start_time")),
+                name="staff_timeoff_start_idk",
+            ),
+        ]
+        ordering = ["start_time"]
+    def __str__(self):
+        return(
+            f"{self.staff_member.display_name}: "
+            f"{self.start_time} - {self.end_time}"
+        )

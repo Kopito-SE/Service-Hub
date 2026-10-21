@@ -89,6 +89,11 @@ class BookingService:
                 start_time=start_time,
                 end_time=end_time
             )
+            AvailabilityService.validate_no_time_off(
+                staff_member=staff_member,
+                start_time=start_time,
+                end_time=end_time
+            )
 
         # Only active reservations block availability.
         conflicts = Booking.objects.filter(

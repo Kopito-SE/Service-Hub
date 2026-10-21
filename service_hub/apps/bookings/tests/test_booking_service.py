@@ -11,7 +11,7 @@ from apps.service_catalog.models import Service
 from apps.bookings.models import Booking
 from apps.bookings.services import BookingService
 from decimal import Decimal
-from apps.availability.models import StaffWorkingHours
+from apps.availability.models import StaffWorkingHours,StaffTimeOff
 
 
 User = get_user_model()
@@ -253,3 +253,67 @@ class BookingServiceTests(TestCase):
                 staff_member_id=self.staff_member.pk,
                 start_time=local_start
             )
+
+    def test_booking_during_staff_time_off_is_rejected(self):
+        time_off_start = self.start_time - timedelta(minutes=30)
+        time_of_end = self.start_time + timedelta(minutes=30)
+
+        StaffTimeOff.objects.create(
+            staff_member=self.staff_member,
+            start_time=time_off_start,
+            end_time=time_of_end,
+            reason="Personal leave"
+        )
+
+        with self.assertRaises(ValidationError):
+            BookingService.create_booking(
+                customer=self.customer,
+                business_id=self.business.pk,
+                service_id=self.service.pk,
+                staff_member_id=self.staff_member.pk,
+                start_time=self.start_time
+            )
+
+    def test_booking_immediately_after_time_off_is_allowed(self):
+        # Time-off ends exactly when the booking starts → touching, not overlapping → allowed.
+        time_off_start = self.start_time - timedelta(hours=1)
+        time_off_end = self.start_time
+
+        StaffTimeOff.objects.create(
+            staff_member=self.staff_member,
+            start_time=time_off_start,
+            end_time=time_off_end,
+            reason="Personal leave",
+        )
+
+        booking = BookingService.create_booking(
+            customer=self.customer,
+            business_id=self.business.pk,
+            service_id=self.service.pk,
+            staff_member_id=self.staff_member.pk,
+            start_time=self.start_time,
+        )
+
+        self.assertIsNotNone(booking.pk)
+        self.assertEqual(booking.status, Booking.Status.PENDING)
+
+    def test_booking_outside_time_off_is_allowed(self):
+        time_off_start = self.start_time + timedelta(days=1)
+        time_off_end = self.start_time + timedelta(days=2)
+
+        StaffTimeOff.objects.create(
+            staff_member=self.staff_member,
+            start_time=time_off_start,
+            end_time=time_off_end,
+            reason="Personal leave"
+        )
+
+        booking = BookingService.create_booking(
+            customer=self.customer,
+            business_id=self.business.pk,
+            staff_member_id=self.staff_member.pk,
+            service_id=self.service.pk,
+            start_time=self.start_time
+        )
+
+        self.assertEqual(booking.status, Booking.Status.PENDING)
