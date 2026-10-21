@@ -33,7 +33,7 @@ class AvailabilityService:
             raise ValidationError({
                 "start_time":(
                     "This staff member has no working hours configured"
-                    "for the selected day"
+                    " for the selected day"
                 )
             })
 
@@ -46,8 +46,8 @@ class AvailabilityService:
         ):
             raise ValidationError({
                 "start_time": (
-                    "The Appointment must fit within the staff member's "
-                    "working hours."
+                    "The Appointment must fit within the staff member's"
+                    " working hours."
                 )
             })
 
