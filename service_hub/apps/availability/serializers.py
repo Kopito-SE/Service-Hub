@@ -1,6 +1,11 @@
+from contextlib import closing
+
 from rest_framework import serializers
 from apps.businesses.models import StaffMember
 from .models import StaffWorkingHours, StaffTimeOff
+from apps.bookings.models import Booking
+from django.utils import timezone
+
 
 class OwnedStaffMemberSerializerMixin:
     def validate_staff_member(self, staff_member):
@@ -34,6 +39,74 @@ class StaffWorkingHoursSerializer(
             "closing_time"
         ]
         read_only_fields = ["id"]
+
+    def validate(self, attrs):
+        opening_time = attrs.get(
+            "opening_time",
+            getattr(self.instance, "closing_time", None),
+        )
+        closing_time = attrs.get(
+            "closing_time",
+            getattr(self.instance, "closing_time", None)
+        )
+
+        if (
+            opening_time is not None
+            and closing_time is not None
+            and closing_time <=opening_time
+        ):
+            raise serializers.ValidationError({
+                "closing_time": "Closing time must be after opening time."
+            })
+
+        staff_member = attrs.get(
+            "staff_member",
+            getattr(self.instance, "staff_member", None),
+        )
+
+        weekday = attrs.get(
+            "weekday",
+            getattr(self.instance, "weekday", None),
+        )
+
+        if (
+            staff_member is not None
+            and weekday is not None
+            and opening_time is not None
+            and closing_time is not None
+        ):
+            bookings = Booking.objects.filter(
+                staff_member=staff_member,
+                status__in=[
+                    Booking.Status.PENDING,
+                    Booking.Status.CONFIRMED
+                ],
+                end_time__gt=timezone.now(),
+            )
+
+            for booking in bookings:
+                local_start = timezone.localtime(booking.start_time)
+                local_end = timezone.localtime(booking.end_time)
+
+                if local_start.weekday() != weekday:
+                    continue
+
+                booking_start = local_start.time().replace(tzinfo=None)
+                booking_end = local_end.time().replace(tzinfo=None)
+
+                if(
+                    booking_start < opening_time
+                    or booking_end > closing_time
+                ):
+                    raise serializers.ValidationError({
+                        "opening_time": (
+                            "The working hour would conflict with "
+                            "an existing booking."
+                        )
+                    })
+        return attrs
+
+
 
 class StaffTimeOffSerializer(
     OwnedStaffMemberSerializerMixin,
@@ -69,7 +142,38 @@ class StaffTimeOffSerializer(
                 raise serializers.ValidationError({
                     "end_time":"End time must be after start_time."
                 })
+
+
+        staff_member = attrs.get(
+            "staff_member",
+            getattr(self.instance, "staff_member", None),
+        )
+
+        if (
+            staff_member is not None
+            and start_time is not None
+            and end_time is not None
+        ):
+            conflicts = Booking.objects.filter(
+                staff_member=staff_member,
+                status__in=[
+                    Booking.Status.PENDING,
+                    Booking.Status.CONFIRMED,
+                ],
+                start_time__lt=end_time,
+                end_time__gt=start_time,
+            )
+
+            if conflicts.exists():
+                raise serializers.ValidationError({
+                    "start_time": (
+                        "Time off cannot overlap a pending or confirmed "
+                        "booking."
+                    )
+                })
+
         return attrs
 
     # I used mixins because a mixin shares behaviour across classes without requiring them to inherit
     # from a common domain model
+
