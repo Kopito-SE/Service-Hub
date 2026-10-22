@@ -1,10 +1,8 @@
-from contextlib import closing
-
+from rest_framework.exceptions import ValidationError
 from rest_framework import serializers
 from apps.businesses.models import StaffMember
 from .models import StaffWorkingHours, StaffTimeOff
-from apps.bookings.models import Booking
-from django.utils import timezone
+from apps.availability.services import AvailabilityService
 
 
 class OwnedStaffMemberSerializerMixin:
@@ -75,35 +73,15 @@ class StaffWorkingHoursSerializer(
             and opening_time is not None
             and closing_time is not None
         ):
-            bookings = Booking.objects.filter(
-                staff_member=staff_member,
-                status__in=[
-                    Booking.Status.PENDING,
-                    Booking.Status.CONFIRMED
-                ],
-                end_time__gt=timezone.now(),
-            )
-
-            for booking in bookings:
-                local_start = timezone.localtime(booking.start_time)
-                local_end = timezone.localtime(booking.end_time)
-
-                if local_start.weekday() != weekday:
-                    continue
-
-                booking_start = local_start.time().replace(tzinfo=None)
-                booking_end = local_end.time().replace(tzinfo=None)
-
-                if(
-                    booking_start < opening_time
-                    or booking_end > closing_time
-                ):
-                    raise serializers.ValidationError({
-                        "opening_time": (
-                            "The working hour would conflict with "
-                            "an existing booking."
-                        )
-                    })
+            try:
+                AvailabilityService.validate_working_hours_change(
+                    staff_member=staff_member,
+                    weekday=weekday,
+                    opening_time=opening_time,
+                    closing_time=closing_time
+                )
+            except ValidationError as exc:
+                raise serializers.ValidationError(exc.detail)
         return attrs
 
 
@@ -154,24 +132,14 @@ class StaffTimeOffSerializer(
             and start_time is not None
             and end_time is not None
         ):
-            conflicts = Booking.objects.filter(
-                staff_member=staff_member,
-                status__in=[
-                    Booking.Status.PENDING,
-                    Booking.Status.CONFIRMED,
-                ],
-                start_time__lt=end_time,
-                end_time__gt=start_time,
-            )
-
-            if conflicts.exists():
-                raise serializers.ValidationError({
-                    "start_time": (
-                        "Time off cannot overlap a pending or confirmed "
-                        "booking."
-                    )
-                })
-
+            try:
+                AvailabilityService.validate_time_off_against_bookings(
+                    staff_member=staff_member,
+                    start_time=start_time,
+                    end_time=end_time
+                )
+            except ValidationError as exc:
+                raise serializers.ValidationError(exc.detail)
         return attrs
 
     # I used mixins because a mixin shares behaviour across classes without requiring them to inherit

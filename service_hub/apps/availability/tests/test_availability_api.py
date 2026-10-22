@@ -224,7 +224,98 @@ class AvailabilityAPITests(APITestCase):
             response.status_code,
             status.HTTP_404_NOT_FOUND,
         )
+    # Regression Tests for scheduling conflict
+    def create_future_booking(self):
+        local_start = timezone.localtime(
+            timezone.now() + timedelta(days=14)
+        ).replace(
+            hour=10,
+            minute=0,
+            second=0,
+            microsecond=0
+        )
 
+        #keep the test appointment safely in the future.
+        if local_start <= timezone.localtime(timezone.now()):
+            local_start += timedelta(days=1)
+
+        return Booking.objects.create(
+            customer=self.owner,
+            business=self.business,
+            service=Service.objects.create(
+                business=self.business,
+                name="Test consultation",
+                price="800.00",
+                duration_minutes=60
+            ),
+            staff_member=self.staff,
+            start_time=local_start,
+            end_time=local_start + timedelta(hours=1),
+            status=Booking.Status.CONFIRMED,
+            price_at_booking="800.00",
+        )
+
+    def test_time_off_conflicting_with_booking_is_rejected(self):
+        booking = self.create_future_booking()
+
+        response = self.client.post(
+            self.time_off_url,
+            {
+                "staff_member": self.staff.pk,
+                "start_time": booking.start_time.isoformat(),
+                "end_time": booking.end_time.isoformat(),
+                "reason": "Leave",
+            },
+            format="json",
+        )
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST
+        )
+
+    def test_working_hours_cannot_exclude_existing_booking(self):
+        booking = self.create_future_booking()
+        weekday = timezone.localtime(
+            booking.start_time
+        ).weekday()
+
+        response = self.client.post(
+            self.working_hours_url,
+            {
+                "staff_member": self.staff.pk,
+                "weekday": weekday,
+                "opening_time": "09:00:00",
+                "closing_time": "10:30:00",
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+    def test_time_off_without_conflict_is_allowed(self):
+        booking = self.create_future_booking()
+
+        start = booking.end_time + timedelta(hours=2)
+        end = start + timedelta(hours=1)
+
+        response = self.client.post(
+            self.time_off_url,
+            {
+                "staff_member": self.staff.pk,
+                "start_time": start.isoformat(),
+                "end_time": end.isoformat(),
+                "reason": "Personal appointment",
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_201_CREATED
+        )
 
 
 

@@ -70,3 +70,70 @@ class AvailabilityService:
                     "The staff member is unavailable during this period."
                 )
             })
+
+    @staticmethod
+    def validate_time_off_against_bookings(
+            *,
+            staff_member,
+            start_time,
+            end_time
+    ):
+        from apps.bookings.models import Booking
+
+        conflicts = Booking.objects.filter(
+            staff_member=staff_member,
+            status__in=[
+                Booking.Status.PENDING,
+                Booking.Status.CONFIRMED,
+            ],
+            start_time__lt=end_time,
+            end_time__gt=start_time
+        )
+
+        if conflicts.exists():
+            raise ValidationError({
+            "start_time":(
+                "Time off cannot overlap a pending or confirmed booking."
+            )
+        })
+
+    @staticmethod
+    def validate_working_hours_change(
+            *,
+            staff_member,
+            weekday,
+            opening_time,
+            closing_time
+    ):
+        from apps.bookings.models import Booking
+
+        future_bookings = Booking.objects.filter(
+            staff_member=staff_member,
+            status__in=[
+                Booking.Status.PENDING,
+                Booking.Status.CONFIRMED
+            ],
+            end_time__gt=timezone.now(),
+        )
+
+        for booking in future_bookings:
+            local_start = timezone.localtime(booking.start_time)
+            local_end = timezone.localtime(booking.end_time)
+
+            if local_start.weekday() != weekday:
+                continue
+
+            booking_start = local_start.time().replace(tzinfo=None)
+            booking_end = local_end.time().replace(tzinfo=None)
+
+            if booking_start < opening_time:
+                raise ValidationError({
+                    "opening_time": "Opening time is too late for an existing booking on this day."
+                })
+
+            if booking_end > closing_time:
+                raise ValidationError({
+                    "closing_time": "Closing time is too early for an existing booking on this day."
+                })
+
+
