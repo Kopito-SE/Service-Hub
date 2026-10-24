@@ -57,7 +57,8 @@ MY_INSTALLED_APPS = [
     'apps.bookings',
     'apps.businesses',
     'apps.service_catalog',
-    'apps.availability'
+    'apps.availability',
+    'apps.payments'
 ]
 
 INSTALLED_APPS = SYSTEM_APPS + MY_INSTALLED_APPS
