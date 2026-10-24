@@ -6,6 +6,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from rest_framework import status
+from rest_framework.status import HTTP_400_BAD_REQUEST
 from rest_framework.test import APITestCase
 
 from apps.businesses.models import Business, StaffMember
@@ -317,6 +318,117 @@ class AvailabilityAPITests(APITestCase):
             status.HTTP_201_CREATED
         )
 
+    def test_updating_working_hours_cannot_exclude_existing_booking(self):
+        booking = self.create_future_booking()
+        weekday = timezone.localtime(booking.start_time).weekday()
 
+        create_response = self.client.post(
+            self.working_hours_url,
+            {
+                "staff_member": self.staff.id,
+                "weekday": weekday,
+                "opening_time": "09:00:00",
+                "closing_time": "17:00:00"
+            },
+            format="json",
+        )
+        self.assertEqual(
+            create_response.status_code,
+            status.HTTP_201_CREATED
+        )
+        url = reverse(
+            "working-hours-detail",
+            args=[create_response.data["id"]]
+        )
+        response = self.client.patch(
+            url,
+            {"closing_time": "10:30:00"},
+            format="json"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_deleting_working_hours_with_future_booking_is_rejected(self):
+        booking = self.create_future_booking()
+        weekday = timezone.localtime(booking.start_time).weekday()
+
+        create_response = self.client.post(
+            self.working_hours_url,
+            {
+                "staff_member": self.staff.id,
+                "weekday": weekday,
+                "opening_time": "09:00:00",
+                "closing_time": "17:00:00"
+            },
+            format="json"
+        )
+        self.assertEqual(
+            create_response.status_code,
+            status.HTTP_201_CREATED
+        )
+        url = reverse(
+            "working-hours-detail",
+            args=[create_response.data["id"]]
+        )
+        response = self.client.delete(url)
+
+        self.assertEqual(response.status_code, HTTP_400_BAD_REQUEST)
+
+    def test_updating_time_off_to_overlap_booking_is_rejected(self):
+        booking = self.create_future_booking()
+
+        initial_start = booking.start_time + timedelta(hours=2)
+        initial_end = booking.start_time + timedelta(hours=3)
+
+        create_response = self.client.post(
+            self.time_off_url,
+            {
+                "staff_member": self.staff.id,
+                "start_time": initial_start.isoformat(),
+                "end_time": initial_end.isoformat(),
+                "reason": "Personal appointment"
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
+
+        url = reverse(
+            "staff-time-off-detail",
+            args=[create_response.data["id"]]
+        )
+
+        response = self.client.patch(
+            url,
+            {
+                "start_time": booking.start_time.isoformat(),
+                "end_time": booking.end_time.isoformat(),
+                "reason": "Updated time off",
+            },
+            format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_deleting_time_off_succeeds(self):
+        start_time = timezone.now() + timedelta(days=20)
+        end_time = start_time + timedelta(hours=1)
+
+        create_response = self.client.post(
+            self.time_off_url,
+            {
+                "staff_member":self.staff.id,
+                "start_time": start_time.isoformat(),
+                "end_time": end_time.isoformat(),
+                "reason": "Personal appointment"
+            },
+            format="json"
+        )
+
+        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
+        time_off_id = create_response.data["id"]
+
+        url = reverse("staff-time-off-detail", args=[time_off_id])
+
+        response = self.client.delete(url)
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
 
 
