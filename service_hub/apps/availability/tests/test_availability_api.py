@@ -1,4 +1,4 @@
-from calendar import weekday
+
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
@@ -372,7 +372,7 @@ class AvailabilityAPITests(APITestCase):
         )
         response = self.client.delete(url)
 
-        self.assertEqual(response.status_code, HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_updating_time_off_to_overlap_booking_is_rejected(self):
         booking = self.create_future_booking()
