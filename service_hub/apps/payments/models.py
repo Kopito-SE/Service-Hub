@@ -40,6 +40,44 @@ class Payment(models.Model):
         max_length=100,
         blank=True,
     )
+
+    phone_number = models.CharField(
+        max_length=13,
+        blank=True
+    )
+
+    checkout_request_id = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        unique=True
+    )
+
+    merchant_request_id = models.CharField(
+        max_length=100,
+        blank=True
+    )
+
+    mpesa_receipt_number = models.CharField(
+        max_length=30,
+        blank=True
+    )
+
+    provider_result_code = models.CharField(
+        max_length=20,
+        blank=True
+    )
+
+    provider_result_description = models.TextField(
+        max_length=255,
+        blank=True
+    )
+
+    callback_received_at = models.DateTimeField(
+        null=True,
+        blank=True
+    )
+
     recorded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -58,6 +96,14 @@ class Payment(models.Model):
                 fields=["method", "transaction_reference"],
                 condition=~Q(transaction_reference=""),
                 name="unique_payment_method_reference",
+            ),
+            models.UniqueConstraint(
+                fields=["mpesa_receipt_number"],
+                condition=(
+                    models.Q(method="mpesa")
+                    & ~models.Q(mpesa_receipt_number="")
+                ),
+                name="unique_mpesa_receipt_number",
             ),
         ]
         indexes = [

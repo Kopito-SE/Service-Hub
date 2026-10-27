@@ -5,18 +5,23 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from apps.bookings.models import Booking
-from .models import Payment
+
 from .selectors import get_business_payments, get_business_payment
 from .serializers import (
-   BookingPaymentSummarySerializer,
-   PaymentCreateSerializer,
-   PaymentReversalCreateSerializer,
-   PaymentReversalSerializer,
-   PaymentSerializer,
-   PaymentStatusSerializer
+    BookingPaymentSummarySerializer,
+    PaymentCreateSerializer,
+    PaymentReversalCreateSerializer,
+    PaymentReversalSerializer,
+    PaymentSerializer,
+    PaymentStatusSerializer, MpesaInitiateSerializer
 )
 
 from .services import PaymentService
+from rest_framework.permissions import AllowAny
+from rest_framework.views import APIView
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
+from .services import MpesaPaymentService
 
 class PaymentViewSet(viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated]
@@ -66,6 +71,24 @@ class PaymentViewSet(viewsets.GenericViewSet):
             status=status.HTTP_201_CREATED
         )
 
+
+
+    @action(detail=False, methods=["post"], url_path="mpesa/initiate")
+    def initiate_mpesa(self, request):
+        serializer = MpesaInitiateSerializer(
+            data=request.data,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        payment = serializer.save()
+
+        return Response(
+            PaymentSerializer(payment).data,
+            status=status.HTTP_201_CREATED
+        )
+
+
+
     @action(detail=True, methods=["post"], url_path="status")
     def set_status(self, request, pk=None):
         payment = self.get_queryset().filter(pk=pk).first()
@@ -84,6 +107,9 @@ class PaymentViewSet(viewsets.GenericViewSet):
         )
 
         return Response(PaymentSerializer(payment).data)
+
+
+
 
     @action(detail=True, methods=["post"], url_path="reverse")
     def reverse(self, request, pk=None):
@@ -107,6 +133,9 @@ class PaymentViewSet(viewsets.GenericViewSet):
             PaymentReversalSerializer(reversal).data,
             status=status.HTTP_201_CREATED
         )
+
+
+
 
     @action(detail=False, methods=["get"], url_path="booking-summary")
     def booking_summary(self, request):
@@ -135,7 +164,44 @@ class PaymentViewSet(viewsets.GenericViewSet):
             BookingPaymentSummarySerializer(summary).data
         )
 
+@method_decorator(csrf_exempt, name="dispatch")
+class MpesaCallbackView(APIView):
+    # Daraja does not send normal user authentication credential.
+    authentication_classes = []
+    permission_classes = [AllowAny]
 
+    def post(self, request):
+        if not isinstance(request.data, dict):
+            return Response(
+                {"detail": "Invalid callback payload."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
+        try:
+            processed = MpesaPaymentService.process_callback(request.data)
+        except Exception:
+            # Log the Exception on the server; never expose internals
+            # or credential in the public response.
+            import logging
+            logging.getLogger(__name__).exception(
+                "Unexpected error processing M-Pesa callback."
+            )
+            return Response(
+                {"detail": "Callback processing failed"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        if not processed:
+            # Keep this visible in server logs and investigate unmatched
+            # callbacks rather than treating them as successful payments.
+            import logging
+            logging.getLogger(__name__).warning(
+                "M-Pesa callback was not processed."
+            )
+
+        return Response(
+            {"ResultCode": 0, "ResultDesc": "Accepted"},
+            status=status.HTTP_200_OK
+        )
 
 

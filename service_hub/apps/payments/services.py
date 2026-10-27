@@ -6,7 +6,12 @@ from rest_framework.exceptions import ValidationError
 
 from apps.bookings.models import Booking
 from .models import Payment, PaymentReversal
+import logging
+from django.utils import timezone
+from .providers.mpesa import MpesaClient, MpesaError
 
+
+logger = logging.getLogger(__name__)
 
 class PaymentService:
 
@@ -240,19 +245,257 @@ class PaymentService:
         }
 
 
+class MpesaPaymentService:
+
+    @staticmethod
+    def initiate_payment(
+        *,
+        booking_id,
+        amount,
+        phone_number,
+        recorded_by,
+    ):
+        # Create the pending payment first. This transaction finishes
+        # before making the external HTTP request.
+        payment = PaymentService.create_payment(
+            booking_id=booking_id,
+            amount=amount,
+            method=Payment.Method.MPESA,
+            recorded_by=recorded_by,
+        )
+
+        payment.phone_number = phone_number
+        payment.save(update_fields=["phone_number", "updated_at"])
+
+        try:
+            result = MpesaClient.initiate_stk_push(
+                phone_number=phone_number,
+                amount=payment.amount,
+                account_reference=f"SH{payment.pk}",
+                transaction_desc="Service Hub booking",
+            )
+        except MpesaError as exc:
+            # The provider might have received the request even if
+            # our HTTP client timed out. Keep the payment pending.
+            # Do not automatically issue another STK Push.
+            payment.provider_result_description = str(exc)[:255]
+            payment.save(
+                update_fields=[
+                    "provider_result_description",
+                    "updated_at",
+                ]
+            )
+            raise
+
+        payment.checkout_request_id = result["CheckoutRequestID"]
+        payment.merchant_request_id = result.get(
+            "MerchantRequestID", ""
+        )
+        payment.provider_result_code = result.get("ResponseCode", "")
+        payment.provider_result_description = result.get(
+            "ResponseDescription", ""
+        )[:255]
+        payment.save(
+            update_fields=[
+                "checkout_request_id",
+                "merchant_request_id",
+                "provider_result_code",
+                "provider_result_description",
+                "updated_at",
+            ]
+        )
+
+        return payment
 
 
+    @staticmethod
+    def process_callback(callback_data):
+        """
+        Process a Daraja STK callback.
 
+        Repeated callbacks for an already processed payment are harmless.
+        This validates the callback data but does not cryptographically
+        authenticate its source.
+        """
+        stk_callback = (
+            callback_data.get("Body", {}).get("stkCallback", {})
+        )
 
+        checkout_id = stk_callback.get("CheckoutRequestID")
+        merchant_id = stk_callback.get("MerchantRequestID")
+        result_code = stk_callback.get("ResultCode")
+        result_description = str(
+            stk_callback.get("ResultDesc", "")
+        )[:255]
 
+        if not checkout_id or result_code is None:
+            logger.warning("Received an incomplete M-Pesa callback.")
+            return False
 
+        # First locate the payment without acquiring a lock. Then lock
+        # the booking followed by the payment, consistently.
+        initial_payment = Payment.objects.filter(
+            checkout_request_id=checkout_id,
+            method=Payment.Method.MPESA,
+        ).only("pk", "booking_id").first()
 
+        if initial_payment is None:
+            logger.warning(
+                "M-Pesa callback has an unknown checkout request ID."
+            )
+            return False
 
+        with transaction.atomic():
+            booking = Booking.objects.select_for_update().get(
+                pk=initial_payment.booking_id
+            )
 
+            payment = Payment.objects.select_for_update().get(
+                pk=initial_payment.pk
+            )
 
+            # Another callback may have processed this payment while
+            # this request was waiting for the database locks.
+            if payment.status != Payment.Status.PENDING:
+                return True
 
+            if (
+                payment.merchant_request_id
+                and merchant_id
+                and payment.merchant_request_id != merchant_id
+            ):
+                logger.warning(
+                    "M-Pesa callback merchant ID mismatch for payment %s.",
+                    payment.pk,
+                )
+                return False
 
+            payment.callback_received_at = timezone.now()
+            payment.provider_result_code = str(result_code)[:20]
+            payment.provider_result_description = result_description
 
+            # Non-zero ResultCode means the STK transaction did not
+            # complete successfully according to this callback.
+            if str(result_code) != "0":
+                payment.status = Payment.Status.FAILED
+                payment.save(update_fields=[
+                    "status",
+                    "callback_received_at",
+                    "provider_result_code",
+                    "provider_result_description",
+                    "updated_at",
+                ])
+                return True
 
+            # Extract the metadata without assuming every field exists.
+            metadata = (
+                stk_callback.get("CallbackMetadata", {}).get("Item", [])
+            )
+            items = {
+                item.get("Name"): item.get("Value")
+                for item in metadata
+                if isinstance(item, dict) and item.get("Name")
+            }
 
+            amount = items.get("Amount")
+            receipt = items.get("MpesaReceiptNumber")
+            callback_phone = items.get("PhoneNumber")
 
+            if amount is None or not receipt or callback_phone is None:
+                payment.provider_result_description = (
+                    "Successful callback missing required payment metadata; "
+                    "manual reconciliation required."
+                )
+                payment.save(update_fields=[
+                    "callback_received_at",
+                    "provider_result_code",
+                    "provider_result_description",
+                    "updated_at",
+                ])
+                return False
+
+            # Compare the amount actually reported with the requested amount.
+            try:
+                callback_amount = Decimal(str(amount))
+                expected_amount = Decimal(payment.amount)
+            except Exception:
+                return False
+
+            if callback_amount != expected_amount:
+                payment.provider_result_description = (
+                    "Callback amount mismatch; manual reconciliation required."
+                )
+                payment.save(update_fields=[
+                    "callback_received_at",
+                    "provider_result_code",
+                    "provider_result_description",
+                    "updated_at",
+                ])
+                return False
+
+            # Normalize both phone numbers before comparing them.
+            try:
+                normalized_phone = MpesaClient.normalize_phone_number(
+                    callback_phone
+                )
+                expected_phone = MpesaClient.normalize_phone_number(
+                    payment.phone_number
+                )
+            except MpesaError:
+                return False
+
+            if normalized_phone != expected_phone:
+                payment.provider_result_description = (
+                    "Callback phone mismatch; manual reconciliation required."
+                )
+                payment.save(update_fields=[
+                    "callback_received_at",
+                    "provider_result_code",
+                    "provider_result_description",
+                    "updated_at",
+                ])
+                return False
+
+            # Never attach one M-Pesa receipt to multiple payments.
+            duplicate_receipt = Payment.objects.filter(
+                method=Payment.Method.MPESA,
+                mpesa_receipt_number=receipt,
+            ).exclude(pk=payment.pk).exists()
+
+            if duplicate_receipt:
+                logger.warning(
+                    "Duplicate M-Pesa receipt received for payment %s.",
+                    payment.pk,
+                )
+                return False
+
+            # Ensure this payment does not exceed the booking's remaining
+            # balance if other payments succeeded while the STK was pending.
+            net_paid = PaymentService._get_net_paid_amount(booking)
+            outstanding = booking.price_at_booking - net_paid
+
+            if payment.amount > outstanding:
+                payment.provider_result_description = (
+                    "Payment received but booking balance conflicts; "
+                    "manual reconciliation required."
+                )
+                payment.save(update_fields=[
+                    "callback_received_at",
+                    "provider_result_code",
+                    "provider_result_description",
+                    "updated_at",
+                ])
+                return False
+
+            payment.mpesa_receipt_number = str(receipt)[:30]
+            payment.status = Payment.Status.SUCCEEDED
+            payment.save(update_fields=[
+                "status",
+                "mpesa_receipt_number",
+                "callback_received_at",
+                "provider_result_code",
+                "provider_result_description",
+                "updated_at",
+            ])
+
+            return True

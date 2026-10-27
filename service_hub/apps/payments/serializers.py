@@ -3,8 +3,11 @@ from rest_framework import serializers
 
 from apps.bookings.models import Booking
 from .models import Payment, PaymentReversal
-from .services import PaymentService
+from .services import PaymentService, MpesaPaymentService
 from decimal import Decimal
+
+from .providers.mpesa import MpesaClient, MpesaError
+
 
 class PaymentSerializer(serializers.ModelSerializer):
     class Meta:
@@ -22,6 +25,55 @@ class PaymentSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = fields
+
+
+class MpesaInitiateSerializer(serializers.Serializer):
+    booking = serializers.PrimaryKeyRelatedField(
+        queryset=Booking.objects.none()
+    )
+    amount = serializers.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        min_value=1,
+    )
+    phone_number = serializers.CharField(max_length=20)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get("request")
+
+        if request and request.user.is_authenticated:
+            self.fields["booking"].queryset = Booking.objects.filter(
+                business__owner=request.user
+            )
+
+    def validate_phone_number(self, value):
+        try:
+            return MpesaClient.normalize_phone_number(value)
+        except MpesaError as exc:
+            raise serializers.ValidationError(str(exc))
+
+    def create(self, validated_data):
+        request = self.context["request"]
+
+        try:
+            return MpesaPaymentService.initiate_payment(
+                booking_id=validated_data["booking"].pk,
+                amount=validated_data["amount"],
+                phone_number=validated_data["phone_number"],
+                recorded_by=request.user,
+            )
+        except MpesaError as exc:
+            from rest_framework.exceptions import APIException
+
+            error = APIException(
+                "The STK Push outcome may be unknown. "
+                "Check the payment status before retrying."
+            )
+            error.status_code = 502
+            raise error from exc
+
+
 
 
 class PaymentCreateSerializer(serializers.Serializer):
