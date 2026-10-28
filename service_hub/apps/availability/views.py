@@ -39,7 +39,7 @@ class StaffWorkingHoursViewSet(viewsets.ModelViewSet):
             "staff_member" in data
             and data["staff_member"].pk != instance.staff_member_id
         ):
-            from rest_framework.exeptions import ValidationError
+            from rest_framework.exceptions import ValidationError
 
             raise ValidationError({
                 "staff_member": (
@@ -48,14 +48,13 @@ class StaffWorkingHoursViewSet(viewsets.ModelViewSet):
                     "a new record instead"
                 )
             })
-        serializer.instance = (
-            AvailabilityManagementService.update_working_hours(
+        serializer.instance = AvailabilityManagementService.update_working_hours(
                 working_hours_id=instance.pk,
                 weekday=data.get("weekday", instance.weekday),
                 opening_time=data.get("opening_time", instance.opening_time),
-                closing_time=data.get("closing_time", instance.closing_time)
-            ),
-        )
+                closing_time=data.get("closing_time", instance.closing_time),
+            )
+
 
     def perform_destroy(self, instance):
         AvailabilityManagementService.delete_working_hours(

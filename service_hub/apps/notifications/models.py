@@ -10,8 +10,8 @@ class Notification(models.Model):
         BOOKING_CREATED = "booking_created", "Booking Created"
         BOOKING_CONFIRMED = "booking_confirmed", "Booking Confirmed"
         BOOKING_CANCELLED = "booking_cancelled", "Booking Cancelled"
-        BOOKING_SUCCEEDED = "payment_succeeded", "Payment Succeeded"
         PAYMENT_FAILED = "payment_failed", "Payment Failed"
+        PAYMENT_SUCCEEDED = "payment_succeeded", "Payment Succeeded"
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
@@ -40,6 +40,8 @@ class Notification(models.Model):
         default=Status.PENDING
     )
     sent_at = models.DateTimeField(null=True, blank=True)
+    read_at = models.DateTimeField(null=True, blank=True)
+
     failure_reason = models.CharField(max_length=255, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)

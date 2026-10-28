@@ -41,7 +41,7 @@ class StaffWorkingHoursSerializer(
     def validate(self, attrs):
         opening_time = attrs.get(
             "opening_time",
-            getattr(self.instance, "closing_time", None),
+            getattr(self.instance, "opening_time", None),
         )
         closing_time = attrs.get(
             "closing_time",
