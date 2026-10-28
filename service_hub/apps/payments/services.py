@@ -66,12 +66,14 @@ class PaymentService:
             recorded_by,
             transaction_reference="",
             currency="KES",
+            allow_customer=False,
     ):
         booking = PaymentService._get_locked_booking(booking_id)
-        PaymentService._check_business_owner(
-            booking=booking,
-            user=recorded_by
-        )
+        if not (allow_customer and booking.customer_id == recorded_by.pk):
+            PaymentService._check_business_owner(
+                booking=booking,
+                user=recorded_by,
+            )
 
         if booking.status in [
             Booking.Status.CANCELLED,
@@ -262,6 +264,7 @@ class MpesaPaymentService:
             amount=amount,
             method=Payment.Method.MPESA,
             recorded_by=recorded_by,
+            allow_customer=True,
         )
 
         payment.phone_number = phone_number

@@ -1,9 +1,10 @@
 import base64
+from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 import re
+from zoneinfo import ZoneInfo
 import requests
 from django.conf import settings
-from django.utils import timezone
 
 class MpesaError(Exception):
     """Raised when a Daraja request fails or returns an invalid response"""
@@ -29,7 +30,7 @@ class MpesaClient:
             )
 
         if not settings.MPESA_CALLBACK_URL.startswith("https://"):
-            raise MpesaError("The Daraja callback nust be HTTPS.")
+            raise MpesaError("The Daraja callback must be HTTPS.")
 
         if settings.MPESA_ENVIRONMENT not in {"sandbox", "production"}:
             raise MpesaError("Invalid Daraja Environment")
@@ -63,7 +64,7 @@ class MpesaClient:
         try:
             response = requests.get(
                 url,
-                params={"grant_type": "client_credential"},
+                params={"grant_type": "client_credentials"},
                 auth=(
                     settings.MPESA_CONSUMER_KEY,
                     settings.MPESA_CONSUMER_SECRET
@@ -85,7 +86,10 @@ class MpesaClient:
         return token
     @staticmethod
     def _timestamp():
-        return timezone.localtime().strftime("%Y%m%d%H%M%S")
+        # Daraja validates the STK Timestamp against East African
+        # Time (UTC+3), so never use the server's TIME_ZONE setting
+        # (e.g. UTC) or the generated password/timestamp is rejected.
+        return datetime.now(ZoneInfo("Africa/Nairobi")).strftime("%Y%m%d%H%M%S")
 
     @classmethod
     def initiate_stk_push(

@@ -1,4 +1,5 @@
 
+from django.db.models import Q
 from rest_framework import serializers
 
 from apps.bookings.models import Booking
@@ -44,7 +45,7 @@ class MpesaInitiateSerializer(serializers.Serializer):
 
         if request and request.user.is_authenticated:
             self.fields["booking"].queryset = Booking.objects.filter(
-                business__owner=request.user
+                Q(business__owner=request.user) | Q(customer=request.user)
             )
 
     def validate_phone_number(self, value):
@@ -175,5 +176,3 @@ class BookingPaymentSummarySerializer(serializers.Serializer):
     outstanding_balance = serializers.DecimalField(
         max_digits=10, decimal_places=2
     )
-
-
