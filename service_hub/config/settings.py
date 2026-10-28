@@ -59,7 +59,8 @@ MY_INSTALLED_APPS = [
     'apps.businesses',
     'apps.service_catalog',
     'apps.availability',
-    'apps.payments'
+    'apps.payments',
+    'apps.notifications' #.apps.notificationConfig
 ]
 
 INSTALLED_APPS = SYSTEM_APPS + MY_INSTALLED_APPS
