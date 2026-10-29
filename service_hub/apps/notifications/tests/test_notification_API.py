@@ -98,7 +98,7 @@ class NotificationAPITests(APITestCase):
 
         response = self.client.get(self.list_url)
 
-        self.assertEqual(
+        self.assertIn(
             response.status_code,
             (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN)
         )
