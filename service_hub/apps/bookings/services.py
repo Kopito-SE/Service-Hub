@@ -10,8 +10,8 @@ from apps.service_catalog.models import Service
 
 from .models import Booking
 from apps.availability.services import AvailabilityService
-
-from apps.availability.services import AvailabilityService
+from apps.events.dispatcher import dispatch
+from apps.events.events import BookingCreated, BookingCancelled
 
 
 class BookingService:
@@ -124,7 +124,7 @@ class BookingService:
                 )
             })
 
-        return Booking.objects.create(
+        booking = Booking.objects.create(
             customer=customer,
             business=business,
             service=service,
@@ -135,6 +135,19 @@ class BookingService:
             price_at_booking=service.price,
             status=Booking.Status.PENDING,
         )
+        # Event Publishing
+        event = BookingCreated(
+            booking_id=booking.pk,
+            customer_id=booking.customer_id,
+            service_name=str(booking.service)
+        )
+
+        transaction.on_commit(
+            lambda: dispatch(event),
+            robust=True,
+        )
+
+        return booking
 
     @staticmethod
     @transaction.atomic
@@ -155,5 +168,17 @@ class BookingService:
 
         booking.status = Booking.Status.CANCELLED
         booking.save(update_fields=["status", "updated_at"])
+
+        # Event Publishing
+        event = BookingCancelled(
+            booking_id=booking.pk,
+            customer_id=booking.customer_id,
+            service_name=str(booking.service)
+        )
+
+        transaction.on_commit(
+            lambda: dispatch(event),
+            robust=True,
+        )
 
         return booking
