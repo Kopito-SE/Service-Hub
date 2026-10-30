@@ -1,68 +1,64 @@
 from django.test import SimpleTestCase
-from apps.events.dispatcher import dispatch, subscribe
+from apps.events.dispatcher import dispatch, subscribe, _handlers
+from apps.events.events import BookingCreated
 
-class ExampleEvent:
-    pass
-
-class AnotherExampleEvent:
-    pass
 
 class EventDispatcherTests(SimpleTestCase):
 
     def setUp(self):
-        # Use unique event classes in each test to avoid
-        # depending on handlers registered by other tests.
-        self.event_type = type("TestEvent", (), {})
-        self.event = self.event_type()
+        self._original = {k: v.copy() for k, v in _handlers.items()}
+        _handlers.clear()
 
-    def test_dispatch_calls_registered_handler(self):
-        received_events = []
+    def tearDown(self):
+        _handlers.clear()
+        _handlers.update(self._original)
 
-        def handler(event):
-            received_events.append(event)
+    def _event(self):
+        return BookingCreated(
+            booking_id=1,
+            customer_id=10,
+            service_name="Haircut",
+        )
 
-        subscribe(self.event_type, handler)
-        dispatch(self.event)
-
-        self.assertEqual(received_events, [self.event])
-
-    def test_dispatch_calls_multiple_handlers(self):
+    def test_single_handler(self):
         received = []
+        subscribe(BookingCreated, received.append)
+        event = self._event()
+        dispatch(event)
+        self.assertEqual(received, [event])
 
-        def first_handler(event):
-            received.append("first")
-
-        def second_handler(event):
-            received.append("second")
-
-        subscribe(self.event_type, first_handler)
-        subscribe(self.event_type, second_handler)
-
-        dispatch(self.event)
-
+    def test_multiple_handlers_ordered(self):
+        received = []
+        subscribe(BookingCreated, lambda e: received.append("first"))
+        subscribe(BookingCreated, lambda e: received.append("second"))
+        dispatch(self._event())
         self.assertEqual(received, ["first", "second"])
-    def test_one_handler_failure_does_not_stop_other_handlers(self):
+
+    def test_duplicate_handler_ignored(self):
+        received = []
+        subscribe(BookingCreated, received.append)
+        subscribe(BookingCreated, received.append)
+        dispatch(self._event())
+        self.assertEqual(len(received), 1)
+
+    def test_handler_failure_isolated_and_logged(self):
         received = []
 
-        def failing_handler(event):
+        def failing(event):
             raise RuntimeError("Simulated handler failure")
 
-        def successful_handler(event):
-            received.append(event)
+        subscribe(BookingCreated, failing)
+        subscribe(BookingCreated, received.append)
 
-        subscribe(self.event_type, failing_handler)
-        subscribe(self.event_type, successful_handler)
+        event = self._event()
+        with self.assertLogs("apps.events.dispatcher", level="ERROR"):
+            dispatch(event)
 
-        with self.assertLogs(
-            "apps.events.dispatcher",
-            level="ERROR",
-        ):
+        self.assertEqual(received, [event])
 
-            dispatch(self.event)
+    def test_unregistered_event_noop(self):
+        class UnregisteredEvent:
+            pass
 
-        self.assertEqual(received, [self.event])
-
-    def test_unregistered_event_does_nothing(self):
-        dispatch(AnotherExampleEvent())
-
-
+        # Should not raise — no handlers registered for this type.
+        dispatch(UnregisteredEvent())

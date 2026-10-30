@@ -9,7 +9,8 @@ from .models import Payment, PaymentReversal
 import logging
 from django.utils import timezone
 from .providers.mpesa import MpesaClient, MpesaError
-
+from apps.events.dispatcher import dispatch
+from apps.events.events import PaymentSucceeded, PaymentFailed
 
 logger = logging.getLogger(__name__)
 
@@ -160,6 +161,24 @@ class PaymentService:
 
         payment.status = new_status
         payment.save(update_fields=["status", "updated_at"])
+        if new_status == Payment.Status.SUCCEEDED:
+            event = PaymentSucceeded(
+                payment_id=payment.pk,
+                booking_id=booking.pk,
+                customer_id=booking.customer_id,
+                amount=payment.amount
+            )
+        else:
+            event = PaymentFailed(
+                payment_id=payment.pk,
+                booking_id=booking.pk,
+                customer_id=booking.customer_id,
+                amount=payment.amount
+            )
+        transaction.on_commit(
+            lambda event=event: dispatch(event),
+            robust=True,
+        )
         return payment
 
     @staticmethod
@@ -388,6 +407,17 @@ class MpesaPaymentService:
                     "provider_result_description",
                     "updated_at",
                 ])
+
+                event = PaymentFailed(
+                    payment_id=payment.pk,
+                    booking_id=booking.pk,
+                    customer_id=booking.customer_id,
+                    amount=payment.amount
+                )
+                transaction.on_commit(
+                    lambda event=event: dispatch(event),
+                    robust=True
+                )
                 return True
 
             # Extract the metadata without assuming every field exists.
@@ -500,5 +530,17 @@ class MpesaPaymentService:
                 "provider_result_description",
                 "updated_at",
             ])
+
+            event = PaymentSucceeded(
+                payment_id=payment.pk,
+                booking_id=booking.pk,
+                customer_id=booking.customer_id,
+                amount=payment.amount
+            )
+
+            transaction.on_commit(
+                lambda event=event: dispatch(event),
+                robust=True
+            )
 
             return True
