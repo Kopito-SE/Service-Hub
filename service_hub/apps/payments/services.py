@@ -9,7 +9,7 @@ from .models import Payment, PaymentReversal
 import logging
 from django.utils import timezone
 from .providers.mpesa import MpesaClient, MpesaError
-from apps.events.dispatcher import dispatch
+from apps.events.outbox import OutboxService
 from apps.events.events import PaymentSucceeded, PaymentFailed
 
 logger = logging.getLogger(__name__)
@@ -175,10 +175,9 @@ class PaymentService:
                 customer_id=booking.customer_id,
                 amount=payment.amount
             )
-        transaction.on_commit(
-            lambda event=event: dispatch(event),
-            robust=True,
-        )
+
+        OutboxService.record_event(event)
+
         return payment
 
     @staticmethod
@@ -414,10 +413,9 @@ class MpesaPaymentService:
                     customer_id=booking.customer_id,
                     amount=payment.amount
                 )
-                transaction.on_commit(
-                    lambda event=event: dispatch(event),
-                    robust=True
-                )
+
+                OutboxService.record_event(event)
+
                 return True
 
             # Extract the metadata without assuming every field exists.
@@ -538,9 +536,6 @@ class MpesaPaymentService:
                 amount=payment.amount
             )
 
-            transaction.on_commit(
-                lambda event=event: dispatch(event),
-                robust=True
-            )
+            OutboxService.record_event(event)
 
             return True

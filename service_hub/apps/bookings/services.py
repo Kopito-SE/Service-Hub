@@ -10,7 +10,7 @@ from apps.service_catalog.models import Service
 
 from .models import Booking
 from apps.availability.services import AvailabilityService
-from apps.events.dispatcher import dispatch
+from apps.events.outbox import OutboxService
 from apps.events.events import BookingCreated, BookingCancelled
 
 
@@ -142,10 +142,7 @@ class BookingService:
             service_name=str(booking.service)
         )
 
-        transaction.on_commit(
-            lambda: dispatch(event),
-            robust=True,
-        )
+        OutboxService.record_event(event)
 
         return booking
 
@@ -176,9 +173,6 @@ class BookingService:
             service_name=str(booking.service)
         )
 
-        transaction.on_commit(
-            lambda: dispatch(event),
-            robust=True,
-        )
+        OutboxService.record_event(event)
 
         return booking

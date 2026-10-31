@@ -4,6 +4,13 @@ from collections import defaultdict
 logger = logging.getLogger(__name__)
 _handlers = defaultdict(list)
 
+def handler_key(handler):
+    """
+    Generate a stable identifier for a registered handler.
+    """
+    return f"{handler.__module__}.{handler.__qualname__}"
+
+
 def subscribe(event_type, handler):
     """
     Register a handler for a specific event class
@@ -12,14 +19,28 @@ def subscribe(event_type, handler):
     if handler not in _handlers[event_type]:
         _handlers[event_type].append(handler)
 
+def get_handlers(event_type):
+    """
+    Return all handlers registered for a given event type.
+    """
+    return tuple(_handlers.get(event_type, ()))
+
+def get_handler(event_type, key):
+    """
+    Retrieve a registered handler using its stable identifier.
+    """
+    for handler in get_handlers(event_type):
+        if handler_key(handler) == key:
+            return handler
+
+    return None
+
 def dispatch(event):
     """
-    Deliver an event to all handlers registered for its class.
-    One handler failing should not prevent other handlers
-    from receiving the same event
-
+    Immediately dispatch an event to its registered handlers.
+    Retained for any existing code that still needs direct dispatch.
     """
-    for handler in _handlers[type(event)]:
+    for handler in get_handlers(type(event)):
         try:
             handler(event)
         except Exception:
@@ -28,3 +49,4 @@ def dispatch(event):
                 handler.__qualname__,
                 type(event).__name__,
             )
+

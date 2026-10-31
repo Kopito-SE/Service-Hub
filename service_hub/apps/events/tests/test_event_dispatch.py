@@ -1,6 +1,9 @@
 from django.test import SimpleTestCase
 from apps.events.dispatcher import dispatch, subscribe, _handlers
 from apps.events.events import BookingCreated
+from apps.events.outbox import OutboxService
+from apps.events.models import EventOutbox, EventDelivery
+from apps.events.dispatcher import get_handler, handler_key
 
 
 class EventDispatcherTests(SimpleTestCase):
