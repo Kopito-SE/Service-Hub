@@ -8,6 +8,14 @@ from apps.events.processor import process_pending_deliveries
 class OutboxProcessorTests(TestCase):
 
     def setUp(self):
+        from apps.events.dispatcher import _handlers
+
+        # Isolate from global handler registry: registry.py auto-registers
+        # production handlers on import, so we must clear and restore them
+        # to test with only the handlers each test explicitly subscribes.
+        self._original_handlers = {k: v.copy() for k, v in _handlers.items()}
+        _handlers.clear()
+
         self.received = []
 
         self.event = BookingCreated(
@@ -15,6 +23,14 @@ class OutboxProcessorTests(TestCase):
             customer_id=5,
             service_name="Haircut"
         )
+
+    def tearDown(self):
+        from apps.events.dispatcher import _handlers
+
+        _handlers.clear()
+        _handlers.update(self._original_handlers)
+
+
 
     def test_processor_executes_registered_handlers(self):
         from apps.events.dispatcher import subscribe

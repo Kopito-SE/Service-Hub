@@ -99,10 +99,11 @@ WSGI_APPLICATION = 'config.wsgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
-
+'''
 print("DEBUG DATABASE_URL =", repr(os.getenv("DATABASE_URL")))
 print("DEBUG POSTGRES_DB =", repr(os.getenv("POSTGRES_DB")))
 print("DEBUG has load_dotenv been called?")
+'''
 
 database_url = os.getenv("DATABASE_URL")
 if database_url:
