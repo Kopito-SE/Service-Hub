@@ -1,5 +1,6 @@
 from django.db import models
 from django.utils import timezone
+import uuid
 
 class EventOutbox(models.Model):
     class Status(models.TextChoices):
@@ -73,6 +74,11 @@ class EventDelivery(models.Model):
     processing_started_at = models.DateTimeField(
         null=True,
         blank=True
+    )
+    processing_token = models.UUIDField(
+        null=True,
+        blank=True,
+        editable=False
     )
 
     created_at = models.DateTimeField(auto_now_add=True)

@@ -1,6 +1,6 @@
 import logging
 from datetime import timedelta
-
+import uuid
 from django.db import transaction
 from django.db.models import F, Q
 from django.utils import timezone
@@ -42,8 +42,7 @@ def claim_delivery():
     )
     with transaction.atomic():
         delivery = (
-            EventDelivery.objects
-            .select_for_update()
+            EventDelivery.objects.select_for_update(skip_locked=True)
             .filter(eligible, attempts__lt=F("max_attempts"))
             .order_by("next_attempt_at", "created_at")
             .first()
@@ -51,19 +50,37 @@ def claim_delivery():
         if delivery is None:
             return None
 
+        claim_token = uuid.uuid4()
+
         delivery.status = EventDelivery.Status.PROCESSING
         delivery.processing_started_at = now
+        delivery.processing_token = claim_token
         delivery.attempts += 1
 
         delivery.save(
             update_fields=[
                 "status",
                 "processing_started_at",
+                "processing_token",
                 "attempts",
                 "updated_at"
             ]
         )
-        return delivery.pk, now
+        return delivery.pk, claim_token
+
+def renew_delivery_lease(delivery_id, claim_token):
+    now = timezone.now()
+
+    updated = EventDelivery.objects.filter(
+        pk=delivery_id,
+        status=EventDelivery.Status.PROCESSING,
+        processing_token=claim_token
+    ).update(
+        processing_started_at=now,
+    )
+
+    return updated == 1
+
 
 def calculate_retry_time(attempts):
     """
@@ -109,11 +126,23 @@ def refresh_event_status(event_id):
             completed_at=None
         )
 
-def process_delivery(delivery_id, claim_timestamp):
+def process_delivery(delivery_id, claim_token):
     """
     Execute one claimed delivery and record its outcome.
     """
-    delivery = (EventDelivery.objects.select_related("event").get(pk=delivery_id))
+    delivery = EventDelivery.objects.select_related("event").filter(
+        pk=delivery_id,
+        status=EventDelivery.Status.PROCESSING,
+        processing_token=claim_token
+    ).first()
+
+    if delivery is None:
+        logger.warning(
+            "Skipping delivery %s because its processing lease is no longer valid.",
+            delivery_id
+        )
+        return
+
     try:
         event_record = delivery.event
         event = reconstruct_event(event_record.event_type,event_record.payload)
@@ -144,30 +173,48 @@ def process_delivery(delivery_id, claim_timestamp):
             new_status = EventDelivery.Status.FAILED
             next_attempt = calculate_retry_time(delivery.attempts)
 
-        EventDelivery.objects.filter(
+        updated = EventDelivery.objects.filter(
             pk=delivery_id,
             status=EventDelivery.Status.PROCESSING,
-            processing_started_at=claim_timestamp
+            processing_token=claim_token
+
         ).update(
             status=new_status,
             last_error=str(exc),
             next_attempt_at=next_attempt,
             processed_at=failed_at,
-            processing_started_at=None
+            processing_started_at=None,
+            processing_token=None
         )
+
+        if updated == 0:
+            logger.warning(
+                "Fencing detected: Delivery % failed, but the lease was already reclaimed. "
+                "Failure State discarded.",
+                delivery_id
+            )
     else:
         processed_at = timezone.now()
-        EventDelivery.objects.filter(
+        updated = EventDelivery.objects.filter(
             pk=delivery_id,
             status=EventDelivery.Status.PROCESSING,
-            processing_started_at=claim_timestamp
+            processing_token=claim_token
+
         ).update(
             status=EventDelivery.Status.SUCCEEDED,
             last_error="",
             processed_at=processed_at,
-            processing_started_at=None
+            processing_started_at=None,
+            processing_token=None
         )
+        if updated == 0:
+            logger.warning(
+                "Fencing detected:; Delivery %s succeeded, but the lease was already reclaimed. "
+                "Success state discarded.",
+                delivery_id
+            )
     refresh_event_status(delivery.event_id)
+
 
 def process_pending_deliveries(limit=100):
     """
@@ -191,9 +238,9 @@ def process_pending_deliveries(limit=100):
         if claimed is None:
             break
 
-        delivery_id, claim_timestamp = claimed
+        delivery_id, claim_token = claimed
 
-        process_delivery(delivery_id,claim_timestamp)
+        process_delivery(delivery_id, claim_token)
 
         delivery = EventDelivery.objects.get(pk=delivery_id)
 
@@ -234,7 +281,8 @@ def recover_exhausted_deliveries():
         status=EventDelivery.Status.DEAD,
         last_error="Processing abandoned after maximum attempts.",
         processed_at=timezone.now(),
-        processing_started_at=None
+        processing_started_at=None,
+        processing_token=None
     )
 
     for event_id in event_ids:
