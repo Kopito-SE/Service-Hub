@@ -4,7 +4,12 @@ from apps.notifications.models import Notification
 
 User = get_user_model()
 
-def handle_booking_created(event):
+def _delivery_key(delivery_id):
+    if delivery_id is None:
+        return None
+    return f"event-delivery-{delivery_id}"
+
+def handle_booking_created(event, *, delivery_id=None):
     customer = User.objects.get(pk=event.customer_id)
 
     NotificationService.create_notification(
@@ -13,11 +18,11 @@ def handle_booking_created(event):
         subject="Booking received",
         message=(
             f"Your booking for {event.service_name} "
-            "has been received successfully"
+            "has been received successfully."
         ),
+        idempotency_key=_delivery_key(delivery_id),
     )
-
-def handle_booking_cancelled(event):
+def handle_booking_cancelled(event, *, delivery_id=None):
     customer = User.objects.get(pk=event.customer_id)
 
     NotificationService.create_notification(
@@ -28,9 +33,10 @@ def handle_booking_cancelled(event):
             f"Your booking for {event.service_name} "
             "has been cancelled."
         ),
+        idempotency_key=_delivery_key(delivery_id)
     )
 
-def handle_payment_succeeded(event):
+def handle_payment_succeeded(event, *, delivery_id=None):
     customer = User.objects.get(pk=event.customer_id)
 
     NotificationService.create_notification(
@@ -41,9 +47,10 @@ def handle_payment_succeeded(event):
             f"Your payment of {event.amount} for booking "
             f"{event.booking_id} was successful."
         ),
+        idempotency_key=_delivery_key(delivery_id)
     )
 
-def handle_payment_failed(event):
+def handle_payment_failed(event, *, delivery_id=None):
     customer = User.objects.get(pk=event.customer_id)
 
     NotificationService.create_notification(
@@ -55,4 +62,5 @@ def handle_payment_failed(event):
             f"#{event.booking_id} was unsuccessful. "
             "Please check the payment status before trying again."
         ),
+        idempotency_key=_delivery_key(delivery_id)
     )

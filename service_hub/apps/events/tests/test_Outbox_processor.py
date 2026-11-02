@@ -1,9 +1,11 @@
 from django.test import TestCase
-
 from apps.events.events import BookingCreated
 from apps.events.models import EventDelivery, EventOutbox
 from apps.events.outbox import OutboxService
 from apps.events.processor import process_pending_deliveries
+from unittest.mock import patch
+from django.utils import timezone
+
 
 class OutboxProcessorTests(TestCase):
 
@@ -35,8 +37,8 @@ class OutboxProcessorTests(TestCase):
     def test_processor_executes_registered_handlers(self):
         from apps.events.dispatcher import subscribe
 
-        def test_handler(event):
-            self.received.append(event)
+        def test_handler(event, *, delivery_id):
+            self.received.append((event, delivery_id))
 
         subscribe(BookingCreated, test_handler)
         event_record = OutboxService.record_event(self.event)
@@ -56,12 +58,12 @@ class OutboxProcessorTests(TestCase):
         self.assertEqual(result["succeeded"], 1)
         self.assertEqual(delivery.status, EventDelivery.Status.SUCCEEDED)
         self.assertEqual(event_record.status, EventOutbox.Status.COMPLETED)
-        self.assertEqual(self.received, [self.event])
+        self.assertEqual(self.received, [(self.event, delivery.pk)])
 
     def test_failed_handler_is_recorded_for_retry(self):
         from apps.events.dispatcher import subscribe
 
-        def failing_handler(event):
+        def failing_handler(event, *, delivery_id):
             raise RuntimeError("Simulated failure")
 
         subscribe(BookingCreated, failing_handler)
@@ -86,4 +88,74 @@ class OutboxProcessorTests(TestCase):
         self.assertEqual(delivery.attempts, 1)
         self.assertIn("Simulated failure", delivery.last_error)
         self.assertEqual(event_record.status, EventOutbox.Status.PROCESSING)
+
+    @patch("apps.events.processor.notify_dead_delivery")
+    def test_dead_delivery_generate_admin_alert(self, mock_notify):
+        mock_notify.return_value = True
+
+        event_record = EventOutbox.objects.create(
+            event_type="apps.events.events.BookingCreated",
+            payload={
+                "booking_id": 20,
+                "customer_id": 5,
+                "service_name": "Haircut"
+            },
+        )
+
+        delivery = EventDelivery.objects.create(
+            event = event_record,
+            handler_key="apps.notifications.handlers.handle_booking_created",
+            status=EventDelivery.Status.DEAD,
+            attempts=5,
+            max_attempts=5,
+            last_error="Simulated permanent failure",
+        )
+
+        from apps.events.processor import process_dead_letter_alerts
+
+        result = process_dead_letter_alerts()
+
+        delivery.refresh_from_db()
+
+        self.assertEqual(result["alerted"], 1)
+        self.assertEqual(result["failed"], 0)
+        self.assertIsNotNone(delivery.alerted_at)
+        mock_notify.assert_called_once()
+
+    @patch("apps.events.processor.notify_dead_delivery")
+    def test_failed_alert_remains_pending(self, mock_notify):
+        mock_notify.side_effect = RuntimeError("Notification service unavailability")
+
+        event_record = EventOutbox.objects.create(
+            event_type = "apps.events.events.BookingCreated",
+            payload={
+                "booking_id": 20,
+                "customer_id": 5,
+                "service_name": "Haircut"
+            },
+        )
+
+        delivery = EventDelivery.objects.create(
+            event=event_record,
+            handler_key="apps.notifications.handlers.handle_booking_created",
+            status=EventDelivery.Status.DEAD,
+            attempts=5,
+            max_attempts=5,
+            last_error="Simulated permanents failure"
+        )
+        from apps.events.processor import process_dead_letter_alerts
+
+        result = process_dead_letter_alerts()
+
+        delivery.refresh_from_db()
+
+        self.assertEqual(result["alerted"], 0)
+        self.assertEqual(result["failed"], 1)
+        self.assertIsNone(delivery.alerted_at)
+
+
+
+
+
+
 

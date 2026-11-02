@@ -12,6 +12,7 @@ class Notification(models.Model):
         BOOKING_CANCELLED = "booking_cancelled", "Booking Cancelled"
         PAYMENT_FAILED = "payment_failed", "Payment Failed"
         PAYMENT_SUCCEEDED = "payment_succeeded", "Payment Succeeded"
+        SYSTEM_ALERT = "system_alert", "System Alert"
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
@@ -39,6 +40,13 @@ class Notification(models.Model):
         choices=Status.choices,
         default=Status.PENDING
     )
+    idempotency_key = models.CharField(
+        max_length=255,
+        unique=True,
+        null=True,
+        blank=True
+    )
+
     sent_at = models.DateTimeField(null=True, blank=True)
     read_at = models.DateTimeField(null=True, blank=True)
 

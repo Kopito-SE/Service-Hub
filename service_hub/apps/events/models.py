@@ -64,6 +64,10 @@ class EventDelivery(models.Model):
     next_attempt_at = models.DateTimeField(
         default=timezone.now,
     )
+    alerted_at = models.DateTimeField(
+        null=True,
+        blank=True
+    )
 
     last_error = models.TextField(blank=True)
     processing_started_at = models.DateTimeField(

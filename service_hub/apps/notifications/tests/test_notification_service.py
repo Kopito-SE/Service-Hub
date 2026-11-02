@@ -73,3 +73,28 @@ class NotificationServiceTests(TestCase):
                 subject="Test",
                 message="Test message",
             )
+
+    def test_duplicate_notification_is_not_created(self):
+        first = NotificationService.create_notification(
+            recipient=self.user,
+            event_type=Notification.EventType.BOOKING_CREATED,
+            subject="Booking Received",
+            message="Your booking has been received.",
+            idempotency_key="event-delivery-999"
+        )
+        second = NotificationService.create_notification(
+            recipient=self.user,
+            event_type=Notification.EventType.BOOKING_CREATED,
+            subject="Booking Received",
+            message="Your booking has been received.",
+            idempotency_key="event-delivery-999"
+        )
+
+        self.assertEqual(first.pk, second.pk)
+
+        self.assertEqual(
+            Notification.objects.filter(
+                idempotency_key="event-delivery-999"
+            ).count(),
+            1,
+        )

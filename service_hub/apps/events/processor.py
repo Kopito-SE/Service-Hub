@@ -8,7 +8,7 @@ from django.utils import timezone
 from apps.events.dispatcher import get_handler
 from apps.events.event_factory import reconstruct_event
 from apps.events.models import EventDelivery, EventOutbox
-
+from apps.events.dead_letter import notify_dead_delivery, mark_delivery_alerted
 logger = logging.getLogger(__name__)
 
 # Processor configuration
@@ -126,7 +126,7 @@ def process_delivery(delivery_id, claim_timestamp):
                 f"Handler not registered: {delivery.handler_key}"
             )
         # Execute outside the database transaction.
-        handler(event)
+        handler(event, delivery_id=delivery_id)
 
     except Exception as exc:
         logger.exception(
@@ -180,8 +180,11 @@ def process_pending_deliveries(limit=100):
         "processed": 0,
         "succeeded": 0,
         "failed": 0,
-        "dead": 0
+        "dead": 0,
+        "alerts_created": 0,
+        "alert_failures": 0
     }
+
     for _ in range(limit):
         claimed = claim_delivery()
 
@@ -190,10 +193,7 @@ def process_pending_deliveries(limit=100):
 
         delivery_id, claim_timestamp = claimed
 
-        process_delivery(
-            delivery_id,
-            claim_timestamp
-        )
+        process_delivery(delivery_id,claim_timestamp)
 
         delivery = EventDelivery.objects.get(pk=delivery_id)
 
@@ -207,6 +207,10 @@ def process_pending_deliveries(limit=100):
 
         elif delivery.status == EventDelivery.Status.DEAD:
             summary["dead"] += 1
+
+    alert_summary = process_dead_letter_alerts()
+    summary["alerts_created"] = alert_summary["alerted"]
+    summary["alert_failures"] = alert_summary["failed"]
 
     return summary
 
@@ -237,3 +241,39 @@ def recover_exhausted_deliveries():
         refresh_event_status(event_id)
 
     return len(event_ids)
+
+def process_dead_letter_alerts(limit=100):
+    # Create administrator notifications for
+    # dead deliveries that have not been successfully allerted
+    deliveries = (
+        EventDelivery.objects
+        .filter(
+            status=EventDelivery.Status.DEAD,
+            alerted_at__isnull=True,
+        )
+        .select_related("event")
+        .order_by("created_at")[:limit]
+    )
+    alerted = 0
+    failed = 0
+
+    for delivery in deliveries:
+        try:
+            created = notify_dead_delivery(delivery)
+
+            if created:
+                mark_delivery_alerted(delivery.pk)
+                alerted += 1
+
+        except Exception:
+            failed += 1
+
+            logger.exception(
+                "Could not create administrator alert for delivery %s",
+                delivery.pk
+            )
+
+    return {
+        "alerted": alerted,
+        "failed": failed
+    }

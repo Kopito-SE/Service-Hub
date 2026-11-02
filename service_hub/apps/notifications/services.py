@@ -14,7 +14,8 @@ class NotificationService:
             event_type,
             subject,
             message,
-            channel=Notification.Channel.IN_APP
+            channel=Notification.Channel.IN_APP,
+            idempotency_key=None
     ):
         # Validate the requested channel.
         valid_channels = Notification.Channel.values
@@ -32,21 +33,30 @@ class NotificationService:
         # Email notifications remain pending until delivery is implemented.
 
         if channel == Notification.Channel.IN_APP:
-            return Notification.objects.create(
-                recipient=recipient,
-                channel=channel,
-                event_type=event_type,
-                subject=subject,
-                message=message,
-                status=Notification.Status.SENT,
-                sent_at = timezone.now()
-            )
+            status = Notification.Status.SENT
+            sent_at = timezone.now()
+        else:
+            status = Notification.Status.PENDING
+            sent_at = None
 
-        return Notification.objects.create(
+        fields = dict(
             recipient=recipient,
             channel=channel,
             event_type=event_type,
             subject=subject,
             message=message,
-            status=Notification.Status.PENDING
+            status=status,
+            sent_at=sent_at
         )
+
+
+        # Idempotent or plain create - key decides, Not Channel
+
+        if idempotency_key:
+            notification, _created = Notification.objects.get_or_create(
+                idempotency_key=idempotency_key,
+                defaults=fields
+            )
+            return notification
+
+        return Notification.objects.create(**fields)
