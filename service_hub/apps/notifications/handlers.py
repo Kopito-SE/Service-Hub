@@ -11,7 +11,13 @@ def _delivery_key(delivery_id):
 
 def handle_booking_created(event, *, delivery_id=None):
     customer = User.objects.get(pk=event.customer_id)
-
+    '''
+    # TEMPORARY TEST: simulate notification delivery failure.
+    if event.service_name.startswith("Haircut"):
+        raise RuntimeError(
+            "TEST FAILURE: Notification provider outage."
+        )
+    '''
     NotificationService.create_notification(
         recipient=customer,
         event_type=Notification.EventType.BOOKING_CREATED,
@@ -22,6 +28,7 @@ def handle_booking_created(event, *, delivery_id=None):
         ),
         idempotency_key=_delivery_key(delivery_id),
     )
+
 def handle_booking_cancelled(event, *, delivery_id=None):
     customer = User.objects.get(pk=event.customer_id)
 

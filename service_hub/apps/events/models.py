@@ -1,6 +1,7 @@
 from django.db import models
 from django.utils import timezone
 import uuid
+from django.conf import settings
 
 class EventOutbox(models.Model):
     class Status(models.TextChoices):
@@ -85,7 +86,7 @@ class EventDelivery(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     processed_at = models.DateTimeField(null=True, blank=True)
 
-
+    manual_retry_count = models.PositiveIntegerField(default=0)
 
     class Meta:
         ordering = ["created_at"]
@@ -103,3 +104,32 @@ class EventDelivery(models.Model):
         ]
     def __str__(self):
         return f"{self.handler_key} - {self.status}"
+
+class EventDeliveryRetry(models.Model):
+
+    delivery = models.ForeignKey(
+        EventDelivery,
+        on_delete=models.CASCADE,
+        related_name="retry_history"
+    )
+
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="requested_event_retries"
+    )
+
+    retry_number = models.PositiveIntegerField()
+    previous_attempts = models.PositiveIntegerField()
+    previous_error = models.TextField(blank=True)
+    reason = models.TextField()
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Delivery {self.delivery_id} - Manual retry {self.retry_number}"

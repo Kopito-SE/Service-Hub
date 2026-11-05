@@ -49,6 +49,11 @@ def notify_dead_delivery(delivery):
             message=message,
             idempotency_key=(
                 f"dead-letter-{delivery.pk}-admin-{administrator.pk}"
+                if delivery.manual_retry_count == 0
+                else (
+                    f"dead-letter-{delivery.pk}-retry-"
+                    f"{delivery.manual_retry_count}-admin-{administrator.pk}"
+                )
             ),
         )
     return True
