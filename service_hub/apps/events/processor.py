@@ -1,4 +1,6 @@
 import logging
+import threading
+from django.db import close_old_connections
 from datetime import timedelta
 import uuid
 from django.db import transaction
@@ -9,12 +11,17 @@ from apps.events.dispatcher import get_handler
 from apps.events.event_factory import reconstruct_event
 from apps.events.models import EventDelivery, EventOutbox
 from apps.events.dead_letter import notify_dead_delivery, mark_delivery_alerted
+
+
+
 logger = logging.getLogger(__name__)
 
 # Processor configuration
 RECOVERY_TIMEOUT = timedelta(minutes=5)
 BASE_RETRY_DELAY = 60
 MAX_RETRY_DELAY = 3600
+
+LEASE_RENEWAL_INTERVAL = 60
 
 def claim_delivery():
     """
@@ -77,9 +84,73 @@ def renew_delivery_lease(delivery_id, claim_token):
         processing_token=claim_token
     ).update(
         processing_started_at=now,
+        updated_at=now
     )
 
     return updated == 1
+
+def _heartbeat_delivery_lease(
+        delivery_id,
+        claim_token,
+        stop_event
+):
+    while not stop_event.wait(LEASE_RENEWAL_INTERVAL):
+
+        close_old_connections()
+
+        try:
+            renewed = renew_delivery_lease(
+                delivery_id,
+                claim_token
+            )
+
+            if not renewed:
+                logger.warning(
+                    "lease renewal stopped for delivery %s. "
+                    "The processing lease is no longer valid.",
+                    delivery_id
+                )
+                return
+        except Exception:
+            logger.exception(
+                "Could not renew lease for delivery %s.",
+                delivery_id
+            )
+        finally:
+            close_old_connections()
+
+def _execute_handler_with_heartbeat(
+        handler,
+        event,
+        delivery_id,
+        claim_token
+):
+    stop_event = threading.Event()
+
+    heartbeat_thread = threading.Thread(
+        target=_heartbeat_delivery_lease,
+        args=(
+            delivery_id,
+            claim_token,
+            stop_event
+        ),
+        daemon=True,
+        name=f"delivery-heartbeat-{delivery_id}"
+    )
+    heartbeat_thread.start()
+
+    try:
+        handler(
+            event,
+            delivery_id=delivery_id
+        )
+    finally:
+        stop_event.set()
+
+        heartbeat_thread.join(
+            timeout=LEASE_RENEWAL_INTERVAL + 5
+        )
+
 
 
 def calculate_retry_time(attempts):
@@ -155,7 +226,13 @@ def process_delivery(delivery_id, claim_token):
                 f"Handler not registered: {delivery.handler_key}"
             )
         # Execute outside the database transaction.
-        handler(event, delivery_id=delivery_id)
+        # While automatically renewing the processing lease.
+        _execute_handler_with_heartbeat(
+            handler=handler,
+            event=event,
+            delivery_id=delivery_id,
+            claim_token=claim_token
+        )
 
     except Exception as exc:
         logger.exception(
