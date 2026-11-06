@@ -74,3 +74,5 @@ class Notification(models.Model):
             f"{self.recipient_id} - {self.status}"
         )
 
+
+from apps.notifications.email_models import EmailDelivery
