@@ -211,3 +211,9 @@ CELERY_TASK_TIME_LIMIT = 300
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 CELERY_TASK_ACKS_LATE = True
 CELERY_TASK_REJECT_ON_WORKER_LOST = True
+
+# Email Providers
+
+EMAIL_PROVIDER_CLASS = (
+    "apps.notifications.email.providers.smtp.SMTPProvider"
+)
