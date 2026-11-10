@@ -12,8 +12,8 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 import os
 from pathlib import Path
 import dj_database_url
-from django.conf.global_settings import EMAIL_HOST, EMAIL_HOST_PASSWORD, DEFAULT_FROM_EMAIL, EMAIL_BACKEND, \
-    EMAIL_USE_SSL, EMAIL_TIMEOUT
+
+
 from dotenv import load_dotenv
 from celery.schedules import crontab
 from datetime import timedelta
@@ -235,3 +235,19 @@ EMAIL_USE_TLS = True
 EMAIL_USE_SSL = False
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "")
 EMAIL_TIMEOUT = 30
+
+# Validate email settings are properly configured
+email_settings = {
+    'EMAIL_HOST': EMAIL_HOST,
+    'EMAIL_PORT': EMAIL_PORT,
+    'EMAIL_HOST_USER': EMAIL_HOST_USER,
+    'EMAIL_HOST_PASSWORD': EMAIL_HOST_PASSWORD,
+    'DEFAULT_FROM_EMAIL': DEFAULT_FROM_EMAIL,
+}
+
+for setting_name, setting_value in email_settings.items():
+    if not setting_value:
+        raise ValueError(
+            f"Email setting '{setting_name}' is not configured. "
+            f"Please set it in your .env file."
+        )
