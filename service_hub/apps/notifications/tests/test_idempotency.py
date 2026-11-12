@@ -33,7 +33,7 @@ class NotificationIdempotencyTests(TestCase):
 
         notification = Notification.objects.filter(
             recipient=self.customer,
-            idempotency_key=f"event-delivery-{delivery_id}"
+            idempotency_key=f"event-delivery-{delivery_id}-in_app"
         )
 
         self.assertEqual(notification.count(), 1)

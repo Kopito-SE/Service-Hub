@@ -19,6 +19,18 @@ class Notification(models.Model):
         SENT = "sent", "Sent"
         FAILED = "failed", "Failed"
 
+    class Severity(models.TextChoices):
+        INFO="info", "Informational"
+        WARNING="warning", "Warning"
+        CRITICAL="critical", "Critical"
+
+
+    severity = models.CharField(
+        max_length=20,
+        choices=Severity.choices,
+        default=Severity.INFO
+    )
+
     recipient = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
