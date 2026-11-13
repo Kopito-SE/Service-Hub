@@ -66,6 +66,7 @@ MY_INSTALLED_APPS = [
     'apps.payments',
     'apps.notifications', #.apps.notificationConfig
     'apps.events', #.apps.EventConfig
+    'apps.customers'
 
 ]
 
