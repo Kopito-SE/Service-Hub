@@ -183,17 +183,3 @@ class MpesaClient:
                 "Daraja did not return a checkout request Identifier"
             )
         return result
-
-
-
-
-
-
-
-
-
-
-
-
-
-

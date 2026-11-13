@@ -62,7 +62,7 @@ class Notification(models.Model):
     sent_at = models.DateTimeField(null=True, blank=True)
     read_at = models.DateTimeField(null=True, blank=True)
 
-    failure_reason = models.CharField(max_length=255, blank=True)
+    failure_reason = models.TextField(blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

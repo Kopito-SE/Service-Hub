@@ -1,11 +1,10 @@
 import uuid
 from datetime import timedelta
-
 from django.db import transaction
 from django.db.models import F, Q
 from django.utils import timezone
 
-from apps.notifications.models import EmailDelivery
+from apps.notifications.models import EmailDelivery, Notification
 from apps.notifications.email.providers.base import EmailProvider
 from apps.notifications.email.providers.exceptions import (
     TemporaryEmailProviderError,
@@ -20,6 +19,34 @@ MAX_RETRY_DELAY = 3600
 class EmailDeliveryProcessor:
     def __init__(self, provider: EmailProvider):
         self.provider = provider
+
+    @staticmethod
+    def _sync_notification(
+            delivery,
+            status,
+            sent_at=None,
+            failure_reason=""
+    ):
+        """
+        Synchronize the linked Notification with its EmailDelivery.
+        Authentication and system emails may not have a linked Notification, so
+        notification_id can be None
+        :param delivery:
+        :param status:
+        :param sent_at:
+        :param failure_reason:
+        :return:
+        """
+        if delivery.notification_id is None:
+            return
+
+        Notification.objects.filter(
+            pk=delivery.notification_id
+        ).update(
+            status=status,
+            sent_at=sent_at,
+            failure_reason=failure_reason
+        )
 
     def claim_delivery(self):
         now = timezone.now()
@@ -87,25 +114,63 @@ class EmailDeliveryProcessor:
     def mark_as_sent(self, delivery_id, claim_token, result):
         now = timezone.now()
 
-        updated = EmailDelivery.objects.filter(
-            pk=delivery_id,
-            status=EmailDelivery.Status.PROCESSING,
-            processing_token=claim_token
-        ).update(
-            status=EmailDelivery.Status.SENT,
-            provider_message_id=result.provider_message_id or "",
-            sent_at=now,
-            processing_started_at=None,
-            processing_token=None,
-            last_error="",
-            updated_at=now
-        )
+        with transaction.atomic():
+            delivery = (
+                EmailDelivery.objects
+                .select_for_update()
+                .filter(
+                    pk=delivery_id,
+                    status=EmailDelivery.Status.PROCESSING,
+                    processing_token=claim_token
+                )
+                .first()
+            )
 
-        return updated == 1
+            # The claim may have expired or been reclaimed.
+            if delivery is None:
+                return False
+
+            delivery.status = EmailDelivery.Status.SENT
+            delivery.provider_message_id = (
+                result.provider_message_id or ""
+            )
+            delivery.sent_at = now
+            delivery.processing_started_at = None
+            delivery.processing_token = None
+            delivery.last_error = ""
+
+            delivery.save(
+                update_fields=[
+                    "status",
+                    "provider_message_id",
+                    "sent_at",
+                    "processing_started_at",
+                    "processing_token",
+                    "last_error",
+                    "updated_at"
+                ]
+            )
+
+            self._sync_notification(
+                delivery=delivery,
+                status=Notification.Status.SENT,
+                sent_at=now
+            )
+
+            return True
+
     #===================================================================
     # Implement Failure Handling
     #=====================================================================
-    def mark_as_failed(self, delivery_id, claim_token,error, attempts, max_attempts, permanent=False):
+    def mark_as_failed(
+            self,
+            delivery_id,
+            claim_token,
+            error,
+            attempts,
+            max_attempts,
+            permanent=False
+    ):
         now = timezone.now()
 
         exhausted = attempts >= max_attempts
@@ -114,23 +179,56 @@ class EmailDeliveryProcessor:
             status = EmailDelivery.Status.DEAD
             next_attempt_at = now
 
+            notification_status = Notification.Status.FAILED
+            failure_reason = str(error)
+
         else:
             status = EmailDelivery.Status.FAILED
             next_attempt_at = self.calculate_retry_time(attempts)
 
-        updated = EmailDelivery.objects.filter(
-            pk=delivery_id,
-            status=EmailDelivery.Status.PROCESSING,
-            processing_token=claim_token
-        ).update(
-            status=status,
-            next_attempt_at=next_attempt_at,
-            processing_started_at=None,
-            processing_token=None,
-            last_error=str(error),
-            updated_at=now
-        )
-        return updated == 1
+            notification_status = Notification.Status.PENDING
+            failure_reason = ""
+
+        with transaction.atomic():
+            delivery = (
+                EmailDelivery.objects
+                .select_for_update()
+                .filter(
+                    pk=delivery_id,
+                    status=EmailDelivery.Status.PROCESSING,
+                    processing_token=claim_token
+                )
+                .first()
+            )
+            if delivery is None:
+                return False
+
+            delivery.status = status
+            delivery.next_attempt_at = next_attempt_at
+            delivery.processing_started_at = None
+            delivery.processing_token = None
+            delivery.last_error=str(error)
+
+            delivery.save(
+                update_fields=[
+                    "status",
+                    "next_attempt_at",
+                    "processing_started_at",
+                    "processing_token",
+                    "last_error",
+                    "updated_at"
+                ]
+            )
+
+            self._sync_notification(
+                delivery=delivery,
+                status=notification_status,
+                sent_at=None,
+                failure_reason=failure_reason
+            )
+
+            return True
+
     #===========================================================================
     # Implement process_delivery()
     #===========================================================================
@@ -190,22 +288,43 @@ class EmailDeliveryProcessor:
         recovery_threshold = timezone.now() - RECOVERY_TIMEOUT
         now = timezone.now()
 
-        exhausted_deliveries = EmailDelivery.objects.filter(
-            attempts__gte=F("max_attempts"),
-        ).filter(
-            Q(
-                status=EmailDelivery.Status.FAILED
+        with transaction.atomic():
+            exhausted_deliveries = list(
+                EmailDelivery.objects
+                .select_for_update()
+                .filter(
+                    attempts__gte=F("max_attempts"),
+                )
+                .filter(
+                    Q(status=EmailDelivery.Status.FAILED)
+                    |
+                    Q(
+                        status=EmailDelivery.Status.PROCESSING,
+                        processing_started_at__lte=recovery_threshold,
+                    )
+                )
             )
-            |
-            Q(
-                status=EmailDelivery.Status.PROCESSING,
-                processing_started_at__lte=recovery_threshold
-            )
-        )
-        return exhausted_deliveries.update(
-            status=EmailDelivery.Status.DEAD,
-            processing_started_at=None,
-            processing_token=None,
-            last_error="Maximum delivery attempts exhausted.",
-            updated_at=now
-        )
+            for delivery in exhausted_deliveries:
+                delivery.status = EmailDelivery.Status.DEAD
+                delivery.processing_started_at = None
+                delivery.processing_token = None
+                delivery.last_error = (
+                    "Maximum delivery attempts exhausted."
+                )
+
+                delivery.save(
+                    update_fields=[
+                        "status",
+                        "processing_started_at",
+                        "processing_token",
+                        "last_error",
+                        "updated_at"
+                    ]
+                )
+                self._sync_notification(
+                    delivery=delivery,
+                    status=Notification.Status.FAILED,
+                    sent_at=None,
+                    failure_reason=delivery.last_error
+                )
+            return len(exhausted_deliveries)

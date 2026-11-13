@@ -7,9 +7,9 @@ router.register("payment", PaymentViewSet, basename="payment")
 
 urlpatterns = [
     path(
-        "payments/mpesa/callback/",
+        "payments/payment/callback/",
         MpesaCallbackView.as_view(),
-        name="mpesa-callback"
+        name="payment-callback"
     ),
     *router.urls,
 ]
