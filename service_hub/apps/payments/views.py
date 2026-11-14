@@ -43,7 +43,7 @@ class PaymentViewSet(viewsets.GenericViewSet):
         return PaymentSerializer
 
     def list(self, request):
-        payments = self.get_queryset()
+        payment = self.get_queryset()
         serializer = PaymentSerializer(payment, many=True)
         return Response(serializer.data)
 
