@@ -2,8 +2,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework import serializers
 from apps.businesses.models import StaffMember
 from .models import StaffWorkingHours, StaffTimeOff
-from apps.availability.services import AvailabilityService
-
+from apps.availability.services.availability_service import AvailabilityService
 
 class OwnedStaffMemberSerializerMixin:
     def validate_staff_member(self, staff_member):

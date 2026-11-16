@@ -6,13 +6,13 @@ from django.urls import reverse
 from django.utils import timezone
 
 from rest_framework import status
-from rest_framework.status import HTTP_400_BAD_REQUEST
+
 from rest_framework.test import APITestCase
 
 from apps.businesses.models import Business, StaffMember
 from apps.service_catalog.models import Service
 from apps.bookings.models import Booking
-from apps.availability.models import StaffWorkingHours, StaffTimeOff
+from apps.availability.models import StaffWorkingHours, StaffTimeOff, SlotReservation
 
 User = get_user_model()
 
@@ -233,21 +233,21 @@ class AvailabilityAPITests(APITestCase):
             hour=10,
             minute=0,
             second=0,
-            microsecond=0
+            microsecond=0,
         )
 
-        #keep the test appointment safely in the future.
+        # Keep the test appointment safely in the future.
         if local_start <= timezone.localtime(timezone.now()):
             local_start += timedelta(days=1)
 
-        return Booking.objects.create(
+        booking = Booking.objects.create(
             customer=self.owner,
             business=self.business,
             service=Service.objects.create(
                 business=self.business,
                 name="Test consultation",
                 price="800.00",
-                duration_minutes=60
+                duration_minutes=60,
             ),
             staff_member=self.staff,
             start_time=local_start,
@@ -255,6 +255,19 @@ class AvailabilityAPITests(APITestCase):
             status=Booking.Status.CONFIRMED,
             price_at_booking="800.00",
         )
+
+        # Availability owns the reservation, not the Booking model.
+        SlotReservation.objects.create(
+            business=self.business,
+            staff_member=self.staff,
+            booking_reference=booking.pk,
+            start_time=booking.start_time,
+            end_time=booking.end_time,
+            status=SlotReservation.Status.CONFIRMED,
+            expires_at=None,
+        )
+
+        return booking
 
     def test_time_off_conflicting_with_booking_is_rejected(self):
         booking = self.create_future_booking()

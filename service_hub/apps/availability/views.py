@@ -3,7 +3,7 @@ from rest_framework.permissions import IsAuthenticated
 
 from .models import StaffWorkingHours, StaffTimeOff
 from .serializers import(StaffWorkingHoursSerializer, StaffTimeOffSerializer)
-from .services import AvailabilityManagementService
+from .services.availability_management_service import AvailabilityManagementService
 
 
 class StaffWorkingHoursViewSet(viewsets.ModelViewSet):

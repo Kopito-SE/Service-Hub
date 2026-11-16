@@ -9,7 +9,7 @@ from apps.businesses.models import Business, StaffMember
 from apps.service_catalog.models import Service
 
 from .models import Booking
-from apps.availability.services import AvailabilityService
+from apps.availability.services.availability_service import AvailabilityService
 from apps.events.outbox import OutboxService
 from apps.events.events import BookingCreated, BookingCancelled
 
