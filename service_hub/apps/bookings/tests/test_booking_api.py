@@ -11,7 +11,7 @@ from apps.service_catalog.models import Service
 from apps.bookings.models import Booking
 from decimal import Decimal
 
-from apps.availability.models import StaffWorkingHours
+from apps.availability.models import StaffWorkingHours, SlotReservation
 
 User=get_user_model()
 
@@ -58,7 +58,10 @@ class BookingAPITests(APITestCase):
         self.client.force_authenticate(user=self.customer)
 
     def create_booking(self):
-        return Booking.objects.create(
+        start_time = timezone.now() + timedelta(days=3)
+        end_time = start_time + timedelta(minutes=60)
+
+        booking = Booking.objects.create(
 
             customer=self.customer,
             business=self.business,
@@ -70,6 +73,18 @@ class BookingAPITests(APITestCase):
             price_at_booking=self.service.price
 
         )
+
+        SlotReservation.objects.create(
+            business=self.business,
+            staff_member=self.staff_member,
+            booking_reference=booking.pk,
+            start_time=start_time,
+            end_time=end_time,
+            status=SlotReservation.Status.ACTIVE,
+            expires_at=None,
+        )
+
+        return booking
 
     def test_customer_can_list_bookings(self):
         self.create_booking()
@@ -127,8 +142,3 @@ class BookingAPITests(APITestCase):
         response = self.client.get(reverse("booking-list"))
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
-
-
-
-
-

@@ -1,18 +1,21 @@
 from dataclasses import dataclass
 from datetime import datetime
 
+from django.core.exceptions import ObjectDoesNotExist
 from rest_framework.exceptions import ValidationError
 
+from apps.availability.services.availability_service import AvailabilityService
 from apps.availability.services.reservation_service import ReservationService
-
-from apps.businesses.models import Business, StaffMember
+from apps.businesses.models import StaffMember
 
 
 class AvailabilityInterfaceError(Exception):
     """Raised when an Availability component operation fails."""
+
     def __init__(self, detail):
         self.detail = detail
         super().__init__(str(detail))
+
 
 @dataclass(frozen=True)
 class ReservationDTO:
@@ -24,7 +27,9 @@ class ReservationDTO:
     status: str
     expires_at: datetime | None
 
+
 class AvailabilityInterface:
+
     @staticmethod
     def _execute(operation):
         """Translate internal DRF validation errors into interface errors."""
@@ -42,27 +47,27 @@ class AvailabilityInterface:
             start_time=reservation.start_time,
             end_time=reservation.end_time,
             status=reservation.status,
-            expires_at=reservation.expires_at
+            expires_at=reservation.expires_at,
         )
 
     @classmethod
     def validate_appointment(
-            cls,
-            *,
-            business_id,
-            staff_member_id,
-            start_time,
-            end_time
+        cls,
+        *,
+        business_id,
+        staff_member_id,
+        start_time,
+        end_time,
     ):
         """Validate a staff member's working hours and time off."""
+
         def operation():
             try:
                 staff_member = StaffMember.objects.get(
                     pk=staff_member_id,
                     business_id=business_id,
-                    is_active=True
+                    is_active=True,
                 )
-
             except StaffMember.DoesNotExist:
                 raise ValidationError({
                     "staff_member": (
@@ -87,17 +92,17 @@ class AvailabilityInterface:
 
     @classmethod
     def reserve_slot(
-            cls,
-            *,
-            business_id,
-            staff_member_id,
-            booking_reference,
-            start_time,
-            end_time,
-            status="active",
-            expires_at=None
+        cls,
+        *,
+        business_id,
+        staff_member_id,
+        booking_reference,
+        start_time,
+        end_time,
+        status="active",
+        expires_at=None,
     ):
-        reservation = cls._handle_execute(
+        reservation = cls._execute(
             lambda: ReservationService.reserve_slot(
                 business_id=business_id,
                 staff_member_id=staff_member_id,
@@ -105,7 +110,7 @@ class AvailabilityInterface:
                 start_time=start_time,
                 end_time=end_time,
                 status=status,
-                expires_at=expires_at
+                expires_at=expires_at,
             )
         )
 
@@ -115,16 +120,18 @@ class AvailabilityInterface:
     def confirm_reservation(cls, *, booking_reference):
         reservation = cls._execute(
             lambda: ReservationService.confirm_reservation(
-                booking_reference=booking_reference
+                booking_reference=booking_reference,
             )
         )
+
         return cls._to_dto(reservation)
 
     @classmethod
     def release_reservation(cls, *, booking_reference):
-        reservation = cls._handle_validation_error(
+        reservation = cls._execute(
             lambda: ReservationService.release_reservation(
-                booking_reference=booking_reference
+                booking_reference=booking_reference,
             )
         )
+
         return cls._to_dto(reservation)

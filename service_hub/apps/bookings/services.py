@@ -9,7 +9,7 @@ from apps.businesses.models import Business, StaffMember
 from apps.service_catalog.models import Service
 
 from .models import Booking
-from apps.availability.services.availability_service import AvailabilityService
+from apps.availability.interfaces import AvailabilityInterface, AvailabilityInterfaceError
 from apps.events.outbox import OutboxService
 from apps.events.events import BookingCreated, BookingCancelled
 
@@ -82,28 +82,26 @@ class BookingService:
             minutes=service.duration_minutes
         )
 
-        # Asks the Availability component to validate the working schedule
+        # Asks the Availability Interface to validate the working schedule
         if staff_member is not None:
-            AvailabilityService.validate_staff_availability(
-                staff_member=staff_member,
-                start_time=start_time,
-                end_time=end_time
-            )
-            AvailabilityService.validate_no_time_off(
-                staff_member=staff_member,
-                start_time=start_time,
-                end_time=end_time
-            )
+            try:
+                AvailabilityInterface.validate_appointment(
+                    business_id=business_id,
+                    staff_member_id=staff_member_id,
+                    start_time=start_time,
+                    end_time=end_time
+                )
+            except AvailabilityInterfaceError as exc:
+                raise ValidationError(exc.detail) from exc
 
-        # Only active reservations block availability.
         conflicts = Booking.objects.filter(
             business=business,
             status__in=[
                 Booking.Status.PENDING,
-                Booking.Status.CONFIRMED,
+                Booking.Status.CONFIRMED
             ],
             start_time__lt=end_time,
-            end_time__gt=start_time,
+            end_time__gt=start_time
         )
 
         if staff_member is not None:
@@ -119,9 +117,7 @@ class BookingService:
 
         if conflicts.exists():
             raise ValidationError({
-                "start_time": (
-                    "This Time conflicts with an existing booking"
-                )
+                "start_time": "This Time conflicts with an existing booking"
             })
 
         booking = Booking.objects.create(
@@ -135,6 +131,19 @@ class BookingService:
             price_at_booking=service.price,
             status=Booking.Status.PENDING,
         )
+
+        try:
+            AvailabilityInterface.reserve_slot(
+                business_id=business_id,
+                staff_member_id=staff_member_id,
+                booking_reference=booking.pk,
+                start_time=start_time,
+                end_time=end_time,
+                status="active"
+            )
+        except AvailabilityInterfaceError as exc:
+            raise ValidationError(exc.detail) from exc
+
         # Event Publishing
         event = BookingCreated(
             booking_id=booking.pk,
@@ -165,6 +174,12 @@ class BookingService:
 
         booking.status = Booking.Status.CANCELLED
         booking.save(update_fields=["status", "updated_at"])
+        try:
+            AvailabilityInterface.release_reservation(
+                booking_reference=booking.pk
+            )
+        except AvailabilityInterfaceError as exc:
+            raise ValidationError(exc.detail) from exc
 
         # Event Publishing
         event = BookingCancelled(
