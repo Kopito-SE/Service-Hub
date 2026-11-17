@@ -1,7 +1,7 @@
 from datetime import timedelta
 
 from django.db import transaction
-from django.db.models import Q
+
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
@@ -94,31 +94,6 @@ class BookingService:
             except AvailabilityInterfaceError as exc:
                 raise ValidationError(exc.detail) from exc
 
-        conflicts = Booking.objects.filter(
-            business=business,
-            status__in=[
-                Booking.Status.PENDING,
-                Booking.Status.CONFIRMED
-            ],
-            start_time__lt=end_time,
-            end_time__gt=start_time
-        )
-
-        if staff_member is not None:
-            # A staff-specific appointment conflicts with bookings for that
-            # staff member and unassigned bookings that reserve business-wide capacity.
-            conflicts = conflicts.filter(
-                Q(staff_member=staff_member) | Q(staff_member__isnull=True)
-            )
-        else:
-            # Conservative initial Policy: an Unassigned
-            # booking reserves business-wide capacity.
-            pass
-
-        if conflicts.exists():
-            raise ValidationError({
-                "start_time": "This Time conflicts with an existing booking"
-            })
 
         booking = Booking.objects.create(
             customer=customer,

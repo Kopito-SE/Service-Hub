@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 
-from django.core.exceptions import ObjectDoesNotExist
+
 from rest_framework.exceptions import ValidationError
 
 from apps.availability.services.availability_service import AvailabilityService
