@@ -1,15 +1,21 @@
+
 from datetime import timedelta
 
 from django.db import transaction
-
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
-from apps.businesses.models import Business, StaffMember
+from apps.businesses.interfaces import (
+    BusinessInterface,
+    BusinessInterfaceError,
+)
 from apps.service_catalog.models import Service
 
 from .models import Booking
-from apps.availability.interfaces import AvailabilityInterface, AvailabilityInterfaceError
+from apps.availability.interfaces import (
+    AvailabilityInterface,
+    AvailabilityInterfaceError,
+)
 from apps.events.outbox import OutboxService
 from apps.events.events import BookingCreated, BookingCancelled
 
@@ -19,35 +25,37 @@ class BookingService:
     @staticmethod
     @transaction.atomic
     def create_booking(
-            *,
-            customer,
-            business_id,
-            service_id,
-            start_time,
-            staff_member_id=None,
-            notes="",
+        *,
+        customer,
+        business_id,
+        service_id,
+        start_time,
+        staff_member_id=None,
+        notes="",
     ):
+        # 1. Lock and retrieve the business through its public interface.
         try:
-            business = (
-                Business.objects
-                .select_for_update()
-                .get(pk=business_id)
+            business = BusinessInterface.get_business_for_update(
+                business_id=business_id
             )
-        except Business.DoesNotExist:
+        except BusinessInterfaceError as exc:
             raise ValidationError({
-                "business": "This selected business does not exist."
-            })
+                "business": str(exc)
+            }) from exc
 
         if not business.is_active:
             raise ValidationError({
                 "business": "This business is not accepting bookings."
             })
 
+        # 2. Retrieve the service.
+        # ServiceCatalog still has no public interface, so we retain
+        # the direct Service model dependency for now.
         try:
             service = Service.objects.get(
                 pk=service_id,
-                business=business,
-                is_active=True
+                business_id=business_id,
+                is_active=True,
             )
         except Service.DoesNotExist:
             raise ValidationError({
@@ -57,49 +65,47 @@ class BookingService:
                 )
             })
 
-        staff_member = None
+        # 3. Validate the staff member through the Businesses interface.
         if staff_member_id is not None:
             try:
-                staff_member = StaffMember.objects.get(
-                    pk=staff_member_id,
-                    business=business,
-                    is_active=True,
+                BusinessInterface.get_active_staff_member(
+                    staff_member_id=staff_member_id,
+                    business_id=business_id,
                 )
-            except StaffMember.DoesNotExist:
+            except BusinessInterfaceError as exc:
                 raise ValidationError({
-                    "staff_member": (
-                        "Select an active Staff member "
-                        "belonging to this business."
-                    )
-                })
+                    "staff_member": str(exc)
+                }) from exc
 
+        # 4. Validate the booking start time.
         if start_time <= timezone.now():
             raise ValidationError({
-                "start_time": "The booking must be in the Future."
+                "start_time": "The booking must be in the future."
             })
 
         end_time = start_time + timedelta(
             minutes=service.duration_minutes
         )
 
-        # Asks the Availability Interface to validate the working schedule
-        if staff_member is not None:
+        # 5. Ask Availability to validate the working schedule.
+        if staff_member_id is not None:
             try:
                 AvailabilityInterface.validate_appointment(
                     business_id=business_id,
                     staff_member_id=staff_member_id,
                     start_time=start_time,
-                    end_time=end_time
+                    end_time=end_time,
                 )
             except AvailabilityInterfaceError as exc:
                 raise ValidationError(exc.detail) from exc
 
-
+        # 6. Create the booking using foreign-key IDs.
+        # We no longer have Business or StaffMember model instances.
         booking = Booking.objects.create(
             customer=customer,
-            business=business,
+            business_id=business_id,
             service=service,
-            staff_member=staff_member,
+            staff_member_id=staff_member_id,
             start_time=start_time,
             end_time=end_time,
             notes=notes,
@@ -107,6 +113,7 @@ class BookingService:
             status=Booking.Status.PENDING,
         )
 
+        # 7. Ask Availability to reserve the slot.
         try:
             AvailabilityInterface.reserve_slot(
                 business_id=business_id,
@@ -114,18 +121,17 @@ class BookingService:
                 booking_reference=booking.pk,
                 start_time=start_time,
                 end_time=end_time,
-                status="active"
+                status="active",
             )
         except AvailabilityInterfaceError as exc:
             raise ValidationError(exc.detail) from exc
 
-        # Event Publishing
+        # 8. Record the booking-created event in the outbox.
         event = BookingCreated(
             booking_id=booking.pk,
             customer_id=booking.customer_id,
-            service_name=str(booking.service)
+            service_name=str(booking.service),
         )
-
         OutboxService.record_event(event)
 
         return booking
@@ -144,11 +150,12 @@ class BookingService:
 
         if booking.status == Booking.Status.COMPLETED:
             raise ValidationError({
-                "status": "A completed Booking Cannot be cancelled."
+                "status": "A completed booking cannot be cancelled."
             })
 
         booking.status = Booking.Status.CANCELLED
         booking.save(update_fields=["status", "updated_at"])
+
         try:
             AvailabilityInterface.release_reservation(
                 booking_reference=booking.pk
@@ -156,13 +163,12 @@ class BookingService:
         except AvailabilityInterfaceError as exc:
             raise ValidationError(exc.detail) from exc
 
-        # Event Publishing
         event = BookingCancelled(
             booking_id=booking.pk,
             customer_id=booking.customer_id,
-            service_name=str(booking.service)
+            service_name=str(booking.service),
         )
-
         OutboxService.record_event(event)
 
         return booking
+
