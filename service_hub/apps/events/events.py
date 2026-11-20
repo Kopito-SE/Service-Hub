@@ -1,9 +1,6 @@
 from dataclasses import dataclass
 from decimal import Decimal
 
-from sqlalchemy import True_
-
-
 @dataclass(frozen=True)
 class BookingCreated:
     booking_id: int
