@@ -1,16 +1,23 @@
+
 from rest_framework.exceptions import ValidationError
 from django.utils import timezone
 from django.db.models import Q
-from apps.availability.models import StaffWorkingHours, StaffTimeOff, SlotReservation
-from apps.businesses.models import Business, StaffMember
+
+from apps.availability.models import (
+    StaffWorkingHours,
+    StaffTimeOff,
+    SlotReservation,
+)
 
 
 class AvailabilityService:
+
     # Reservation Query Helper
     @staticmethod
-    def _get_blocking_reservations(*, staff_member):
+    def _get_blocking_reservations(*, staff_member_id):
         """
         Return reservations that currently occupy a staff member's time.
+
         ACTIVE and CONFIRMED reservations always block.
         HELD reservations block while their expiry is in the future.
         RELEASED reservations never block.
@@ -18,26 +25,27 @@ class AvailabilityService:
         now = timezone.now()
 
         return SlotReservation.objects.filter(
-            staff_member=staff_member,
+            staff_member_id=staff_member_id
         ).filter(
             Q(
                 status__in=[
                     SlotReservation.Status.ACTIVE,
-                    SlotReservation.Status.CONFIRMED
+                    SlotReservation.Status.CONFIRMED,
                 ]
             )
             |
             Q(
                 status=SlotReservation.Status.HELD,
-                expires_at__gt=now
+                expires_at__gt=now,
             )
         )
+
     @staticmethod
     def validate_staff_availability(
-            *,
-            staff_member,
-            start_time,
-            end_time,
+        *,
+        staff_member_id,
+        start_time,
+        end_time,
     ):
         # Convert aware datetime to Django's current local timezone
         local_start = timezone.localtime(start_time)
@@ -50,17 +58,17 @@ class AvailabilityService:
                     "Appointments must start and end on the same day."
                 )
             })
+
         weekday = local_start.weekday()
 
         working_hours = StaffWorkingHours.objects.filter(
-            staff_member=staff_member,
+            staff_member_id=staff_member_id,
             weekday=weekday,
-
         ).first()
 
         if working_hours is None:
             raise ValidationError({
-                "start_time":(
+                "start_time": (
                     "This staff member has no working hours configured"
                     " for the selected day"
                 )
@@ -82,15 +90,15 @@ class AvailabilityService:
 
     @staticmethod
     def validate_no_time_off(
-            *,
-            staff_member,
-            start_time,
-            end_time
+        *,
+        staff_member_id,
+        start_time,
+        end_time,
     ):
         has_conflict = StaffTimeOff.objects.filter(
-            staff_member=staff_member,
+            staff_member_id=staff_member_id,
             start_time__lt=end_time,
-            end_time__gt=start_time
+            end_time__gt=start_time,
         ).exists()
 
         if has_conflict:
@@ -102,14 +110,14 @@ class AvailabilityService:
 
     @staticmethod
     def validate_time_off_against_bookings(
-            *,
-            staff_member,
-            start_time,
-            end_time
+        *,
+        staff_member_id,
+        start_time,
+        end_time,
     ):
         conflicts = (
             AvailabilityService._get_blocking_reservations(
-                staff_member=staff_member,
+                staff_member_id=staff_member_id
             )
             .filter(
                 start_time__lt=end_time,
@@ -119,26 +127,26 @@ class AvailabilityService:
 
         if conflicts.exists():
             raise ValidationError({
-            "start_time":(
-                "Time off cannot overlap a pending or confirmed booking."
-            )
-        })
+                "start_time": (
+                    "Time off cannot overlap a pending or confirmed booking."
+                )
+            })
 
     @staticmethod
     def validate_working_hours_change(
-            *,
-            staff_member,
-            weekday,
-            opening_time,
-            closing_time
+        *,
+        staff_member_id,
+        weekday,
+        opening_time,
+        closing_time,
     ):
-
         future_reservations = (
             AvailabilityService._get_blocking_reservations(
-                staff_member=staff_member
+                staff_member_id=staff_member_id
             )
             .filter(end_time__gt=timezone.now())
         )
+
         for reservation in future_reservations:
             local_start = timezone.localtime(reservation.start_time)
             local_end = timezone.localtime(reservation.end_time)
@@ -164,4 +172,3 @@ class AvailabilityService:
                         "on this day."
                     )
                 })
-

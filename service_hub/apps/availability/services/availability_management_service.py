@@ -1,49 +1,67 @@
 from rest_framework.exceptions import ValidationError
 from django.utils import timezone
 from django.db import transaction
-from apps.availability.models import StaffWorkingHours, StaffTimeOff, SlotReservation
-from apps.businesses.models import Business, StaffMember
+
+from apps.availability.models import StaffWorkingHours, StaffTimeOff
 from apps.availability.services.availability_service import AvailabilityService
+from apps.businesses.interfaces import (
+    BusinessInterface,
+    BusinessInterfaceError,
+)
+
 
 class AvailabilityManagementService:
+
+    @staticmethod
+    def _get_staff_member(staff_member_id):
+        try:
+            return BusinessInterface.get_staff_member_by_id(
+                staff_member_id=staff_member_id
+            )
+        except BusinessInterfaceError as exc:
+            raise ValidationError(str(exc))
+
+    @staticmethod
+    def _lock_business_for_staff_member(staff_member_id):
+        staff_member = AvailabilityManagementService._get_staff_member(
+            staff_member_id
+        )
+
+        try:
+            BusinessInterface.get_business_for_update(
+                business_id=staff_member.business_id
+            )
+        except BusinessInterfaceError as exc:
+            raise ValidationError(str(exc))
+
+        return staff_member
+
     @staticmethod
     @transaction.atomic
     def create_time_off(
-            *,
-            staff_member_id,
-            start_time,
-            end_time,
-            reason="",
+        *,
+        staff_member_id,
+        start_time,
+        end_time,
+        reason=""
     ):
-        # Lock the business before checking for conflicting bookings.
-        try:
-            staff = StaffMember.objects.select_related(
-                "business"
-            ).get(pk=staff_member_id)
-        except StaffMember.DoesNotExist:
-            raise ValidationError({
-                "staff_member": "Staff member does not exist."
-            })
-        Business.objects.select_for_update().get(
-            pk=staff.business_id
+        staff = AvailabilityManagementService._lock_business_for_staff_member(
+            staff_member_id
         )
-
-        # Re-fetch after acquiring the coordination lock.
-        staff = StaffMember.objects.get(pk=staff_member_id)
 
         if end_time <= start_time:
             raise ValidationError({
-                "end_time": "End time must be after start time"
+                "end_time": "End time must be after start time."
             })
 
         AvailabilityService.validate_time_off_against_bookings(
-            staff_member=staff,
+            staff_member_id=staff.id,
             start_time=start_time,
             end_time=end_time
         )
 
         return StaffTimeOff.objects.create(
-            staff_member=staff,
+            staff_member_id=staff.id,
             start_time=start_time,
             end_time=end_time,
             reason=reason
@@ -52,21 +70,14 @@ class AvailabilityManagementService:
     @staticmethod
     @transaction.atomic
     def create_working_hours(
-            *,
-            staff_member_id,
-            weekday,
-            opening_time,
-            closing_time
+        *,
+        staff_member_id,
+        weekday,
+        opening_time,
+        closing_time
     ):
-        try:
-            staff = StaffMember.objects.get(pk=staff_member_id)
-
-        except StaffMember.DoesNotExist:
-            raise ValidationError({
-                "staff_member": "Staff member does not exist."
-            })
-        Business.objects.select_for_update().get(
-            pk=staff.business_id
+        staff = AvailabilityManagementService._lock_business_for_staff_member(
+            staff_member_id
         )
 
         if closing_time <= opening_time:
@@ -75,14 +86,14 @@ class AvailabilityManagementService:
             })
 
         AvailabilityService.validate_working_hours_change(
-            staff_member=staff,
+            staff_member_id=staff.id,
             weekday=weekday,
             opening_time=opening_time,
             closing_time=closing_time
         )
 
         if StaffWorkingHours.objects.filter(
-            staff_member=staff,
+            staff_member_id=staff.id,
             weekday=weekday
         ).exists():
             raise ValidationError({
@@ -91,8 +102,9 @@ class AvailabilityManagementService:
                     "Update the existing record instead."
                 )
             })
+
         return StaffWorkingHours.objects.create(
-            staff_member=staff,
+            staff_member_id=staff.id,
             weekday=weekday,
             opening_time=opening_time,
             closing_time=closing_time
@@ -105,21 +117,19 @@ class AvailabilityManagementService:
         working_hours_id,
         weekday,
         opening_time,
-        closing_time,
+        closing_time
     ):
         try:
-            schedule = StaffWorkingHours.objects.select_related(
-                "staff_member"
-            ).get(pk=working_hours_id)
+            schedule = StaffWorkingHours.objects.get(
+                pk=working_hours_id
+            )
         except StaffWorkingHours.DoesNotExist:
             raise ValidationError({
                 "working_hours": "Working-hours record does not exist."
             })
 
-        # Coordinate this change with booking creation and other
-        # availability changes for the same business.
-        Business.objects.select_for_update().get(
-            pk=schedule.staff_member.business_id
+        staff = AvailabilityManagementService._lock_business_for_staff_member(
+            schedule.staff_member_id
         )
 
         schedule = StaffWorkingHours.objects.select_for_update().get(
@@ -132,8 +142,8 @@ class AvailabilityManagementService:
             })
 
         duplicate = StaffWorkingHours.objects.filter(
-            staff_member=schedule.staff_member,
-            weekday=weekday,
+            staff_member_id=staff.id,
+            weekday=weekday
         ).exclude(pk=schedule.pk).exists()
 
         if duplicate:
@@ -142,17 +152,22 @@ class AvailabilityManagementService:
             })
 
         AvailabilityService.validate_working_hours_change(
-            staff_member=schedule.staff_member,
+            staff_member_id=staff.id,
             weekday=weekday,
             opening_time=opening_time,
-            closing_time=closing_time,
+            closing_time=closing_time
         )
 
         schedule.weekday = weekday
         schedule.opening_time = opening_time
         schedule.closing_time = closing_time
+
         schedule.save(
-            update_fields=["weekday", "opening_time", "closing_time"]
+            update_fields=[
+                "weekday",
+                "opening_time",
+                "closing_time"
+            ]
         )
 
         return schedule
@@ -161,16 +176,16 @@ class AvailabilityManagementService:
     @transaction.atomic
     def delete_working_hours(*, working_hours_id):
         try:
-            schedule = StaffWorkingHours.objects.select_related(
-                "staff_member"
-            ).get(pk=working_hours_id)
+            schedule = StaffWorkingHours.objects.get(
+                pk=working_hours_id
+            )
         except StaffWorkingHours.DoesNotExist:
             raise ValidationError({
                 "working_hours": "Working-hours record does not exist."
             })
 
-        Business.objects.select_for_update().get(
-            pk=schedule.staff_member.business_id
+        staff = AvailabilityManagementService._lock_business_for_staff_member(
+            schedule.staff_member_id
         )
 
         schedule = StaffWorkingHours.objects.select_for_update().get(
@@ -179,7 +194,7 @@ class AvailabilityManagementService:
 
         future_reservations = (
             AvailabilityService._get_blocking_reservations(
-                staff_member=schedule.staff_member,
+                staff_member_id=staff.id
             )
             .filter(end_time__gt=timezone.now())
         )
@@ -204,19 +219,19 @@ class AvailabilityManagementService:
         time_off_id,
         start_time,
         end_time,
-        reason="",
+        reason=""
     ):
         try:
-            time_off = StaffTimeOff.objects.select_related(
-                "staff_member"
-            ).get(pk=time_off_id)
+            time_off = StaffTimeOff.objects.get(
+                pk=time_off_id
+            )
         except StaffTimeOff.DoesNotExist:
             raise ValidationError({
                 "time_off": "Time-off record does not exist."
             })
 
-        Business.objects.select_for_update().get(
-            pk=time_off.staff_member.business_id
+        staff = AvailabilityManagementService._lock_business_for_staff_member(
+            time_off.staff_member_id
         )
 
         time_off = StaffTimeOff.objects.select_for_update().get(
@@ -229,16 +244,21 @@ class AvailabilityManagementService:
             })
 
         AvailabilityService.validate_time_off_against_bookings(
-            staff_member=time_off.staff_member,
+            staff_member_id=staff.id,
             start_time=start_time,
-            end_time=end_time,
+            end_time=end_time
         )
 
         time_off.start_time = start_time
         time_off.end_time = end_time
         time_off.reason = reason
+
         time_off.save(
-            update_fields=["start_time", "end_time", "reason"]
+            update_fields=[
+                "start_time",
+                "end_time",
+                "reason"
+            ]
         )
 
         return time_off
@@ -247,19 +267,20 @@ class AvailabilityManagementService:
     @transaction.atomic
     def delete_time_off(*, time_off_id):
         try:
-            time_off = StaffTimeOff.objects.select_related(
-                "staff_member"
-            ).get(pk=time_off_id)
+            time_off = StaffTimeOff.objects.get(
+                pk=time_off_id
+            )
         except StaffTimeOff.DoesNotExist:
             raise ValidationError({
                 "time_off": "Time-off record does not exist."
             })
 
-        Business.objects.select_for_update().get(
-            pk=time_off.staff_member.business_id
+        AvailabilityManagementService._lock_business_for_staff_member(
+            time_off.staff_member_id
         )
 
         time_off = StaffTimeOff.objects.select_for_update().get(
             pk=time_off_id
         )
+
         time_off.delete()

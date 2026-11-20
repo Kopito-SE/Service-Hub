@@ -1,12 +1,14 @@
 from dataclasses import dataclass
 from datetime import datetime
 
-
 from rest_framework.exceptions import ValidationError
 
 from apps.availability.services.availability_service import AvailabilityService
 from apps.availability.services.reservation_service import ReservationService
-from apps.businesses.models import StaffMember
+from apps.businesses.interfaces import (
+    BusinessInterface,
+    BusinessInterfaceError,
+)
 
 
 class AvailabilityInterfaceError(Exception):
@@ -63,29 +65,28 @@ class AvailabilityInterface:
 
         def operation():
             try:
-                staff_member = StaffMember.objects.get(
-                    pk=staff_member_id,
-                    business_id=business_id,
-                    is_active=True,
+                BusinessInterface.get_active_staff_member(
+                    staff_member_id=staff_member_id,
+                    business_id=business_id
                 )
-            except StaffMember.DoesNotExist:
+            except BusinessInterfaceError as exc:
                 raise ValidationError({
                     "staff_member": (
                         "Select an active staff member belonging "
                         "to this business."
                     )
-                })
+                }) from exc
 
             AvailabilityService.validate_staff_availability(
-                staff_member=staff_member,
+                staff_member_id=staff_member_id,
                 start_time=start_time,
-                end_time=end_time,
+                end_time=end_time
             )
 
             AvailabilityService.validate_no_time_off(
-                staff_member=staff_member,
+                staff_member_id=staff_member_id,
                 start_time=start_time,
-                end_time=end_time,
+                end_time=end_time
             )
 
         return cls._execute(operation)
@@ -120,7 +121,7 @@ class AvailabilityInterface:
     def confirm_reservation(cls, *, booking_reference):
         reservation = cls._execute(
             lambda: ReservationService.confirm_reservation(
-                booking_reference=booking_reference,
+                booking_reference=booking_reference
             )
         )
 
@@ -130,7 +131,7 @@ class AvailabilityInterface:
     def release_reservation(cls, *, booking_reference):
         reservation = cls._execute(
             lambda: ReservationService.release_reservation(
-                booking_reference=booking_reference,
+                booking_reference=booking_reference
             )
         )
 

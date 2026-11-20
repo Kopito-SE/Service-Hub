@@ -1,6 +1,6 @@
 from rest_framework.exceptions import ValidationError
 from rest_framework import serializers
-from apps.businesses.models import StaffMember
+from apps.businesses.interfaces import BusinessInterface
 from .models import StaffWorkingHours, StaffTimeOff
 from apps.availability.services.availability_service import AvailabilityService
 
@@ -13,13 +13,15 @@ class OwnedStaffMemberSerializerMixin:
                 "Authenticated user required"
             )
 
-        owns_staff_member = StaffMember.objects.filter(
-            pk=staff_member.pk,
-            business__owner=request.user
-        ).exists()
+        owns_staff_member = BusinessInterface.staff_member_belongs_to_owner(
+            staff_member_id=staff_member.pk,
+            owner=request.user
+        )
 
         if not owns_staff_member:
-            raise serializers.ValidationError("You can only manage staff member belonging to your business")
+            raise serializers.ValidationError(
+                "You can only manage staff member belonging to your business"
+            )
         return staff_member
 
 class StaffWorkingHoursSerializer(
@@ -74,7 +76,7 @@ class StaffWorkingHoursSerializer(
         ):
             try:
                 AvailabilityService.validate_working_hours_change(
-                    staff_member=staff_member,
+                    staff_member_id=staff_member.id,
                     weekday=weekday,
                     opening_time=opening_time,
                     closing_time=closing_time
@@ -133,7 +135,7 @@ class StaffTimeOffSerializer(
         ):
             try:
                 AvailabilityService.validate_time_off_against_bookings(
-                    staff_member=staff_member,
+                    staff_member_id=staff_member.id,
                     start_time=start_time,
                     end_time=end_time
                 )

@@ -1,3 +1,4 @@
+from celery.bin.result import result
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
@@ -137,4 +138,19 @@ class BusinessInterfaceTests(TestCase):
             BusinessInterface.get_active_staff_member(
                 staff_member_id=self.staff_member.id,
                 business_id=self.business.id,
+            )
+    # 11. Test retrieve staff member by ID succeeds
+    def test_get_staff_member_by_id_returns_dto(self):
+        result = BusinessInterface.get_staff_member_by_id(
+            staff_member_id=self.staff_member.id
+        )
+        self.assertEqual(result.id, self.staff_member.id)
+        self.assertEqual(result.business_id, self.business.id)
+        self.assertEqual(result.display_name, self.staff_member.display_name)
+
+    # 12. Test retrieving staff member by ID  raises error when missing
+    def test_get_staff_member_by_id_raises_error_when_missing(self):
+        with self.assertRaises(BusinessInterfaceError):
+            BusinessInterface.get_staff_member_by_id(
+                staff_member_id=999999
             )

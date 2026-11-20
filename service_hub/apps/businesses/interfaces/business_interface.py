@@ -154,3 +154,34 @@ class BusinessInterface:
             is_active=staff_member.is_active
         )
 
+    @staticmethod
+    def staff_member_belongs_to_owner(*, staff_member_id, owner):
+        return StaffMember.objects.filter(
+            pk=staff_member_id,
+            business__owner=owner
+        ).exists()
+
+    @staticmethod
+    def get_staff_member_by_id(*, staff_member_id):
+        """
+        Retrieve a staff member by ID without exposing
+        the underlying Django model
+        """
+        try:
+            staff_member = StaffMember.objects.get(
+                pk=staff_member_id
+            )
+
+        except StaffMember.DoesNotExist:
+            raise BusinessInterfaceError(
+                "staff member does not exist."
+            )
+
+        return StaffMemberDTO(
+            id=staff_member.id,
+            business_id=staff_member.business_id,
+            user_id=staff_member.user_id,
+            display_name=staff_member.display_name,
+            is_active=staff_member.is_active
+        )
+
