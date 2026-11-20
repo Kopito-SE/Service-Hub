@@ -16,9 +16,13 @@ from apps.availability.interfaces import (
     AvailabilityInterface,
     AvailabilityInterfaceError,
 )
-from apps.events.outbox import OutboxService
-from apps.events.events import BookingCreated, BookingCancelled
 
+from apps.events.interfaces import (
+    EventsInterface,
+    EventsInterfaceError,
+    BookingCreated,
+    BookingCancelled
+)
 
 class BookingService:
 
@@ -127,7 +131,13 @@ class BookingService:
             customer_id=booking.customer_id,
             service_name=str(booking.service),
         )
-        OutboxService.record_event(event)
+        try:
+            EventsInterface.publish(event)
+
+        except EventsInterfaceError as exc:
+            raise ValidationError({
+                "event": str(exc)
+            }) from exc
 
         return booking
 
@@ -163,7 +173,13 @@ class BookingService:
             customer_id=booking.customer_id,
             service_name=str(booking.service),
         )
-        OutboxService.record_event(event)
+        try:
+            EventsInterface.publish(event)
+
+        except EventsInterfaceError as exc:
+            raise ValidationError({
+                "event": str(exc)
+            }) from exc
 
         return booking
 

@@ -1,6 +1,6 @@
 from apps.events.outbox import OutboxService
 
-class EventInterfaceError(Exception):
+class EventsInterfaceError(Exception):
     """Raised when publishing an event fails."""
 
 class EventsInterface:
@@ -10,4 +10,4 @@ class EventsInterface:
             return OutboxService.record_event(event)
 
         except (TypeError, ValueError) as exc:
-            raise EventInterfaceError(str(exc)) from exc
+            raise EventsInterfaceError(str(exc)) from exc
