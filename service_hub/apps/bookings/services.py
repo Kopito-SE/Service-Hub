@@ -9,7 +9,7 @@ from apps.businesses.interfaces import (
     BusinessInterface,
     BusinessInterfaceError,
 )
-from apps.service_catalog.models import Service
+from apps.service_catalog.interfaces import ServiceInterface, ServiceInterfaceError
 
 from .models import Booking
 from apps.availability.interfaces import (
@@ -48,22 +48,17 @@ class BookingService:
                 "business": "This business is not accepting bookings."
             })
 
-        # 2. Retrieve the service.
-        # ServiceCatalog still has no public interface, so we retain
-        # the direct Service model dependency for now.
+        # 2. Retrieve the service through the Service Catalog Interface.
         try:
-            service = Service.objects.get(
-                pk=service_id,
+            service = ServiceInterface.get_active_service(
+                service_id=service_id,
                 business_id=business_id,
-                is_active=True,
             )
-        except Service.DoesNotExist:
+
+        except ServiceInterfaceError as exc:
             raise ValidationError({
-                "service": (
-                    "Select an active service belonging "
-                    "to the selected business."
-                )
-            })
+                "service": str(exc)
+            }) from exc
 
         # 3. Validate the staff member through the Businesses interface.
         if staff_member_id is not None:
@@ -104,7 +99,7 @@ class BookingService:
         booking = Booking.objects.create(
             customer=customer,
             business_id=business_id,
-            service=service,
+            service_id=service_id,
             staff_member_id=staff_member_id,
             start_time=start_time,
             end_time=end_time,
