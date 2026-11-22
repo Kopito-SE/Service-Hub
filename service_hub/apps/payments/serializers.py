@@ -20,6 +20,7 @@ class PaymentSerializer(serializers.ModelSerializer):
             "currency",
             "method",
             "status",
+            "mpesa_receipt_number",
             "transaction_reference",
             "recorded_by",
             "created_at",

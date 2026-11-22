@@ -244,10 +244,15 @@ class PaymentService:
 
     @staticmethod
     def get_booking_payment_summary(*, booking, user):
-        PaymentService._check_business_owner(
-            booking=booking,
-            user=user
-        )
+
+        # 1. Allow the customer to view their own summary
+        if booking.customer_id != user.pk:
+
+            # 2. If they aren't the customer, then must be the business owner
+            PaymentService._check_business_owner(
+                booking=booking,
+                user=user
+            )
 
         net_paid = PaymentService._get_net_paid_amount(
             booking=booking
@@ -366,10 +371,18 @@ class MpesaPaymentService:
             )
             return False
 
-        with transaction.atomic():
+        """with transaction.atomic():
             booking = Booking.objects.select_for_update().get(
                 pk=initial_payment.booking_id
-            )
+            )"""
+        with transaction.atomic():
+            try:
+                booking = Booking.objects.select_for_update().get(
+                    pk=initial_payment.booking_id
+                )
+            except Booking.DoesNotExist:
+                logger.error(f"Booking {initial_payment.booking_id} not found during M-Pesa callback")
+                return False
 
             payment = Payment.objects.select_for_update().get(
                 pk=initial_payment.pk
@@ -467,10 +480,10 @@ class MpesaPaymentService:
             # Normalize both phone numbers before comparing them.
             try:
                 normalized_phone = MpesaClient.normalize_phone_number(
-                    callback_phone
+                    str(callback_phone)
                 )
                 expected_phone = MpesaClient.normalize_phone_number(
-                    payment.phone_number
+                    str(payment.phone_number)
                 )
             except MpesaError:
                 return False
@@ -502,7 +515,7 @@ class MpesaPaymentService:
 
             # Ensure this payment does not exceed the booking's remaining
             # balance if other payments succeeded while the STK was pending.
-            net_paid = PaymentService._get_net_paid_amount(booking)
+            net_paid = PaymentService._get_net_paid_amount(booking=booking)
             outstanding = booking.price_at_booking - net_paid
 
             if payment.amount > outstanding:
@@ -519,10 +532,12 @@ class MpesaPaymentService:
                 return False
 
             payment.mpesa_receipt_number = str(receipt)[:30]
+            payment.transaction_reference = str(receipt)[:30]
             payment.status = Payment.Status.SUCCEEDED
             payment.save(update_fields=[
                 "status",
                 "mpesa_receipt_number",
+                "transaction_reference",
                 "callback_received_at",
                 "provider_result_code",
                 "provider_result_description",

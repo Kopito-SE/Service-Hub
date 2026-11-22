@@ -1,34 +1,41 @@
+import logging
+from django.db.models import Q
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import ValidationError
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.exceptions import ValidationError, NotFound
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
+from rest_framework.views import APIView
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
 
 from apps.bookings.models import Booking
-
-from .selectors import get_business_payments, get_business_payment
+from .models import Payment
+from .selectors import get_business_payment
 from .serializers import (
     BookingPaymentSummarySerializer,
     PaymentCreateSerializer,
     PaymentReversalCreateSerializer,
     PaymentReversalSerializer,
     PaymentSerializer,
-    PaymentStatusSerializer, MpesaInitiateSerializer
+    PaymentStatusSerializer,
+    MpesaInitiateSerializer
 )
+from .services import PaymentService, MpesaPaymentService
 
-from .services import PaymentService
-from rest_framework.permissions import AllowAny
-from rest_framework.views import APIView
-from django.utils.decorators import method_decorator
-from django.views.decorators.csrf import csrf_exempt
-from .services import MpesaPaymentService
+logger = logging.getLogger(__name__)
 
 class PaymentViewSet(viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated]
     http_method_names = ["get", "post", "head", "options"]
 
     def get_queryset(self):
-        return get_business_payments(self.request.user)
+        user = self.request.user
+
+        # Allow when they are the business owner or Customer who booked
+        return Payment.objects.filter(
+            Q(booking__business__owner=user) | Q(booking__customer=user)
+        ).distinct()
 
     def get_serializer_class(self):
         if self.action == "create":
@@ -48,12 +55,8 @@ class PaymentViewSet(viewsets.GenericViewSet):
         return Response(serializer.data)
 
     def retrieve(self, request, pk=None):
-        payment = get_business_payment(
-            user=request.user,
-            payment_id=pk
-        )
+        payment = self.get_queryset().filter(pk=pk).first()
         if payment is None:
-            from rest_framework.exceptions import NotFound
             raise NotFound("Payment not found.")
 
         return Response(PaymentSerializer(payment).data)
@@ -94,7 +97,6 @@ class PaymentViewSet(viewsets.GenericViewSet):
         payment = self.get_queryset().filter(pk=pk).first()
 
         if payment is None:
-            from rest_framework.exceptions import NotFound
             raise NotFound("Payment not found.")
 
         serializer = PaymentStatusSerializer(data=request.data)
@@ -109,14 +111,11 @@ class PaymentViewSet(viewsets.GenericViewSet):
         return Response(PaymentSerializer(payment).data)
 
 
-
-
     @action(detail=True, methods=["post"], url_path="reverse")
     def reverse(self, request, pk=None):
         payment = self.get_queryset().filter(pk=pk).first()
 
         if payment is None:
-            from rest_framework.exceptions import NotFound
             raise NotFound("Payment not Found.")
 
         serializer = PaymentReversalCreateSerializer(
@@ -147,12 +146,13 @@ class PaymentViewSet(viewsets.GenericViewSet):
             })
 
         try:
+            # Allow if they are the owner OR the customer
             booking = Booking.objects.get(
-                pk=booking_id,
-                business__owner=request.user
+                Q(business__owner=request.user) | Q(customer=request.user),
+                pk=booking_id
             )
+
         except(Booking.DoesNotExist, ValueError):
-            from rest_framework.exceptions import NotFound
             raise NotFound("Booking not Found")
 
         summary = PaymentService.get_booking_payment_summary(
@@ -166,7 +166,6 @@ class PaymentViewSet(viewsets.GenericViewSet):
 
 @method_decorator(csrf_exempt, name="dispatch")
 class MpesaCallbackView(APIView):
-    # Daraja does not send normal user authentication credential.
     authentication_classes = []
     permission_classes = [AllowAny]
 
@@ -179,25 +178,17 @@ class MpesaCallbackView(APIView):
 
         try:
             processed = MpesaPaymentService.process_callback(request.data)
+
         except Exception:
-            # Log the Exception on the server; never expose internals
-            # or credential in the public response.
-            import logging
-            logging.getLogger(__name__).exception(
-                "Unexpected error processing M-Pesa callback."
-            )
+            logger.exception("Unexpected error processing M-Pesa callback.")
+
             return Response(
                 {"detail": "Callback processing failed"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
         if not processed:
-            # Keep this visible in server logs and investigate unmatched
-            # callbacks rather than treating them as successful payments.
-            import logging
-            logging.getLogger(__name__).warning(
-                "M-Pesa callback was not processed."
-            )
+            logger.warning("M-Pesa callback was not processed.")
 
         return Response(
             {"ResultCode": 0, "ResultDesc": "Accepted"},
