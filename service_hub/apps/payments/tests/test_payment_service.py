@@ -10,8 +10,8 @@ from apps.businesses.models import Business
 from apps.bookings.models import Booking
 from apps.service_catalog.models import Service
 
-from ..models import Payment, PaymentReversal
-from ..services import PaymentService
+from apps.payments.models import Payment, PaymentReversal
+from apps.payments.services.payment_service import PaymentService
 
 
 User = get_user_model()

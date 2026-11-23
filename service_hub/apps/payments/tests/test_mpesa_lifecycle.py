@@ -10,7 +10,7 @@ from apps.businesses.models import Business
 from apps.service_catalog.models import Service
 from apps.bookings.models import Booking
 from apps.payments.models import Payment
-from apps.payments.services import MpesaPaymentService
+from apps.payments.services.mpesa_service import MpesaPaymentService
 from apps.payments.providers.mpesa import MpesaError
 
 class MpesaPaymentLifecycleTests(TestCase):
@@ -42,7 +42,7 @@ class MpesaPaymentLifecycleTests(TestCase):
             price_at_booking=Decimal("500.00")
         )
     # 1.Test Successful stk payment Lifecycle
-    @patch("apps.payments.services.MpesaClient.initiate_stk_push")
+    @patch("apps.payments.services.mpesa_service.MpesaClient.initiate_stk_push")
     def test_complete_stk_payment_lifecycle(self, mock_stk_push):
 
         # 1. Simulate a successful Daraja STK initiation response.
@@ -104,7 +104,7 @@ class MpesaPaymentLifecycleTests(TestCase):
         }
 
         # 6. Process the callback.
-        with patch("apps.payments.services.OutboxService.record_event") as mock_record_event:
+        with patch("apps.payments.services.payment_service.OutboxService.record_event") as mock_record_event:
             result = MpesaPaymentService.process_callback(callback_data)
 
             payment.refresh_from_db()
@@ -138,7 +138,7 @@ class MpesaPaymentLifecycleTests(TestCase):
         self.assertIsNotNone(payment.callback_received_at)
 
     # 2.
-    @patch("apps.payments.services.MpesaClient.initiate_stk_push")
+    @patch("apps.payments.services.mpesa_service.MpesaClient.initiate_stk_push")
     def test_cancelled_stk_payment_lifecycle(self, mock_stk_push):
         # 1. Simulate successful STK initiation.
         mock_stk_push.return_value = {
@@ -172,7 +172,7 @@ class MpesaPaymentLifecycleTests(TestCase):
 
         # 4. Process the failure callback.
         with patch(
-            "apps.payments.services.OutboxService.record_event"
+            "apps.payments.services.payment_service.OutboxService.record_event"
         ) as mock_record_event:
             result = MpesaPaymentService.process_callback(callback_data)
 
@@ -192,7 +192,7 @@ class MpesaPaymentLifecycleTests(TestCase):
         self.assertEqual(payment.provider_result_code, "1032")
 
     # 3.
-    @patch("apps.payments.services.MpesaClient.initiate_stk_push")
+    @patch("apps.payments.services.mpesa_service.MpesaClient.initiate_stk_push")
     def test_stk_initiation_error_keeps_payment_pending(self, mock_stk_push):
 
         # Simulate an Ambiguous Daraja timeout
