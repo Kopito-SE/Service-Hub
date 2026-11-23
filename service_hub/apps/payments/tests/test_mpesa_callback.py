@@ -14,7 +14,7 @@ from apps.service_catalog.models import Service
 from apps.bookings.models import Booking
 
 from apps.payments.models import Payment
-from apps.payments.services import MpesaPaymentService
+from apps.payments.services.mpesa_service import MpesaPaymentService
 
 from config.settings import ALLOWED_HOSTS
 
@@ -178,7 +178,7 @@ class MpesaCallbackServiceTests(TestCase):
         )
 
     # 6.
-    @patch("apps.payments.services.OutboxService.record_event")
+    @patch("apps.payments.services.payment_service.OutboxService.record_event")
     def test_duplicate_successful_callback_is_idempotent(self, mock_record_event):
         callback_data = self.successful_callback()
 

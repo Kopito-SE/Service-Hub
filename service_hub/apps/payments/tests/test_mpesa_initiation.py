@@ -47,7 +47,7 @@ class MpesaInitiationAPITests(APITestCase):
             price_at_booking=Decimal("500.00"),
         )
 
-    @patch("apps.payments.services.MpesaClient.initiate_stk_push")
+    @patch("apps.payments.services.mpesa_service.MpesaClient.initiate_stk_push")
     def test_customer_can_initiate_mpesa_for_own_booking(self, initiate_stk):
         initiate_stk.return_value = {
             "CheckoutRequestID": "ws_CO_test_123",
@@ -73,7 +73,7 @@ class MpesaInitiationAPITests(APITestCase):
         self.assertEqual(payment.recorded_by, self.customer)
         initiate_stk.assert_called_once()
 
-    @patch("apps.payments.services.MpesaClient.initiate_stk_push")
+    @patch("apps.payments.services.mpesa_service.MpesaClient.initiate_stk_push")
     def test_other_customer_cannot_initiate_mpesa_for_booking(
         self, initiate_stk
     ):
