@@ -178,13 +178,6 @@ class MpesaClient:
                 "before retrying"
             ) from exc
 
-        response_code = result.get("ResponseCode")
-        if response_code != 0:
-            raise MpesaError(
-                "STK Push rejected by Daraja:"
-                f"{response_code} - {result.get('ResponseDescription', 'Unknown error')}"
-            )
-
         if not result.get("CheckoutRequestID"):
             raise MpesaError(
                 "Daraja did not return a checkout request Identifier"
