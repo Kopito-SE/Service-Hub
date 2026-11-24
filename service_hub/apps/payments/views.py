@@ -1,5 +1,4 @@
 import logging
-from django.db.models import Q
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError, NotFound
@@ -9,9 +8,12 @@ from rest_framework.views import APIView
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 
-from apps.bookings.models import Booking
+from apps.bookings.interfaces import (
+    BookingInterfaceError,
+    get_booking,
+    get_accessible_booking_ids
+)
 from .models import Payment
-from .selectors import get_business_payment
 from .serializers import (
     BookingPaymentSummarySerializer,
     PaymentCreateSerializer,
@@ -32,10 +34,16 @@ class PaymentViewSet(viewsets.GenericViewSet):
     def get_queryset(self):
         user = self.request.user
 
-        # Allow when they are the business owner or Customer who booked
+        if not user.is_authenticated:
+            return Payment.objects.none()
+
+        booking_ids = get_accessible_booking_ids(
+            user_id=user.pk
+        )
+
         return Payment.objects.filter(
-            Q(booking__business__owner=user) | Q(booking__customer=user)
-        ).distinct()
+            booking_id__in=booking_ids
+        )
 
     def get_serializer_class(self):
         if self.action == "create":
@@ -146,14 +154,10 @@ class PaymentViewSet(viewsets.GenericViewSet):
             })
 
         try:
-            # Allow if they are the owner OR the customer
-            booking = Booking.objects.get(
-                Q(business__owner=request.user) | Q(customer=request.user),
-                pk=booking_id
-            )
+            booking = get_booking(booking_id=int(booking_id))
 
-        except(Booking.DoesNotExist, ValueError):
-            raise NotFound("Booking not Found")
+        except (BookingInterfaceError, ValueError, TypeError):
+            raise NotFound("Booking not found")
 
         summary = PaymentService.get_booking_payment_summary(
             booking=booking,

@@ -6,6 +6,7 @@ from apps.bookings.models import Booking
 
 class BookingInterfaceError(Exception):
     """Raised when a booking cannot be retrieved through the public interface"""
+from django.db.models import Q
 
 @dataclass(frozen=True)
 class BookingDTO:
@@ -59,3 +60,12 @@ def get_booking_for_update(*, booking_id):
         )
 
     return _to_dto(booking)
+def get_accessible_booking_ids(*, user_id):
+    """
+    Return IDs of bookings accessible to a user
+    A user can access booking where they are either Business owner ot the customer
+    """
+    return tuple( Booking.objects.filter(
+        Q(business__owner_id=user_id) | Q(customer_id=user_id)
+      ).values_list("id", flat=True)
+    )

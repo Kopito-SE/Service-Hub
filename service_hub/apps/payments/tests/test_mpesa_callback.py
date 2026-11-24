@@ -178,7 +178,7 @@ class MpesaCallbackServiceTests(TestCase):
         )
 
     # 6.
-    @patch("apps.payments.services.payment_service.OutboxService.record_event")
+    @patch("apps.payments.services.mpesa_service.EventsInterface.publish")
     def test_duplicate_successful_callback_is_idempotent(self, mock_record_event):
         callback_data = self.successful_callback()
 

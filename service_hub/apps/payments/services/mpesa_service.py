@@ -4,12 +4,18 @@ from decimal import Decimal
 from django.db import transaction
 from django.utils import timezone
 
-from apps.bookings.models import Booking
-from apps.events.events import PaymentFailed, PaymentSucceeded
-from apps.events.outbox import OutboxService
+from apps.bookings.interfaces import (
+    BookingInterfaceError,
+    get_booking_for_update
+)
+from apps.events.interfaces import(
+    EventsInterface,
+    PaymentFailed,
+    PaymentSucceeded
+)
 from ..models import Payment
 from ..providers.mpesa import MpesaClient, MpesaError
-from .balances import get_net_paid_amount, get_outstanding_amount
+from .balances import get_outstanding_amount
 from .payment_service import PaymentService
 
 logger = logging.getLogger(__name__)
@@ -88,10 +94,10 @@ class MpesaPaymentService:
 
         with transaction.atomic():
             try:
-                booking = Booking.objects.select_for_update().get(
-                    pk=initial_payment.booking_id
+                booking = get_booking_for_update(
+                    booking_id=initial_payment.booking_id
                 )
-            except Booking.DoesNotExist:
+            except BookingInterfaceError:
                 logger.error(
                     "Booking %s not found during M-Pesa callback",
                     initial_payment.booking_id,
@@ -129,9 +135,9 @@ class MpesaPaymentService:
                     "provider_result_description",
                     "updated_at",
                 ])
-                OutboxService.record_event(PaymentFailed(
+                EventsInterface.publish(PaymentFailed(
                     payment_id=payment.pk,
-                    booking_id=booking.pk,
+                    booking_id=booking.id,
                     customer_id=booking.customer_id,
                     amount=payment.amount,
                 ))
@@ -241,9 +247,9 @@ class MpesaPaymentService:
                 "provider_result_description",
                 "updated_at",
             ])
-            OutboxService.record_event(PaymentSucceeded(
+            EventsInterface.publish(PaymentSucceeded(
                 payment_id=payment.pk,
-                booking_id=booking.pk,
+                booking_id=booking.id,
                 customer_id=booking.customer_id,
                 amount=payment.amount,
             ))

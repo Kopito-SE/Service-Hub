@@ -1,14 +1,30 @@
-
-from django.db.models import Q
 from rest_framework import serializers
 
-from apps.bookings.models import Booking
+from apps.bookings.interfaces import BookingInterfaceError, get_booking
 from .models import Payment, PaymentReversal
 from .services import PaymentService, MpesaPaymentService
 from decimal import Decimal
 
 from .providers.mpesa import MpesaClient, MpesaError
 
+def get_authorized_booking(*, booking_id, user, allow_customer=False):
+    try:
+        booking = get_booking(booking_id=booking_id)
+
+    except BookingInterfaceError:
+        raise serializers.ValidationError({
+            "booking": "The selected booking does not exist"
+        })
+
+    is_owner = booking.business_owner_id == user.pk
+    is_customer = booking.customer_id == user.pk
+
+    if not is_owner and not (allow_customer and is_customer):
+        raise serializers.ValidationError({
+            "booking": "You do not have permission to make a payment for this booking."
+        })
+
+    return booking
 
 class PaymentSerializer(serializers.ModelSerializer):
     class Meta:
@@ -30,9 +46,8 @@ class PaymentSerializer(serializers.ModelSerializer):
 
 
 class MpesaInitiateSerializer(serializers.Serializer):
-    booking = serializers.PrimaryKeyRelatedField(
-        queryset=Booking.objects.none()
-    )
+
+    booking = serializers.IntegerField(min_value=1)
     amount = serializers.DecimalField(
         max_digits=10,
         decimal_places=2,
@@ -40,14 +55,18 @@ class MpesaInitiateSerializer(serializers.Serializer):
     )
     phone_number = serializers.CharField(max_length=20)
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def validate_booking(self, value):
         request = self.context.get("request")
 
-        if request and request.user.is_authenticated:
-            self.fields["booking"].queryset = Booking.objects.filter(
-                Q(business__owner=request.user) | Q(customer=request.user)
+        if not request or not request.user.is_authenticated:
+            raise serializers.ValidationError(
+                "Authentication is required."
             )
+        return get_authorized_booking(
+            booking_id=value,
+            user=request.user,
+            allow_customer=True
+        )
 
     def validate_phone_number(self, value):
         try:
@@ -60,7 +79,7 @@ class MpesaInitiateSerializer(serializers.Serializer):
 
         try:
             return MpesaPaymentService.initiate_payment(
-                booking_id=validated_data["booking"].pk,
+                booking_id=validated_data["booking"].id,
                 amount=validated_data["amount"],
                 phone_number=validated_data["phone_number"],
                 recorded_by=request.user,
@@ -79,9 +98,7 @@ class MpesaInitiateSerializer(serializers.Serializer):
 
 
 class PaymentCreateSerializer(serializers.Serializer):
-    booking = serializers.PrimaryKeyRelatedField(
-        queryset=Booking.objects.none()
-    )
+    booking = serializers.IntegerField(min_value=1)
     amount = serializers.DecimalField(
         max_digits=10,
         decimal_places=2,
@@ -100,20 +117,24 @@ class PaymentCreateSerializer(serializers.Serializer):
         allow_blank=True,
     )
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def validate_booking(self, value):
         request = self.context.get("request")
 
-        if request and request.user.is_authenticated:
-            self.fields["booking"].queryset = Booking.objects.filter(
-                business__owner=request.user
+        if not request or not request.user.is_authenticated:
+            raise serializers.ValidationError(
+                "Authentication is required."
             )
+        return get_authorized_booking (
+            booking_id=value,
+            user=request.user,
+            allow_customer=False
+        )
 
     def create(self, validated_data):
         request = self.context["request"]
 
         return PaymentService.create_payment(
-            booking_id=validated_data["booking"].pk,
+            booking_id=validated_data["booking"].id,
             amount=validated_data["amount"],
             method=validated_data["method"],
             recorded_by=request.user,

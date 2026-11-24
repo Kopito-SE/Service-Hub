@@ -104,7 +104,7 @@ class MpesaPaymentLifecycleTests(TestCase):
         }
 
         # 6. Process the callback.
-        with patch("apps.payments.services.payment_service.OutboxService.record_event") as mock_record_event:
+        with patch("apps.payments.services.mpesa_service.EventsInterface.publish") as mock_record_event:
             result = MpesaPaymentService.process_callback(callback_data)
 
             payment.refresh_from_db()
@@ -172,7 +172,7 @@ class MpesaPaymentLifecycleTests(TestCase):
 
         # 4. Process the failure callback.
         with patch(
-            "apps.payments.services.payment_service.OutboxService.record_event"
+            "apps.payments.services.mpesa_service.EventsInterface.publish"
         ) as mock_record_event:
             result = MpesaPaymentService.process_callback(callback_data)
 

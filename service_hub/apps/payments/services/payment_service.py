@@ -5,11 +5,15 @@ from django.db import transaction
 from django.db.models import Sum
 from rest_framework.exceptions import ValidationError
 
-from apps.bookings.models import Booking
-from apps.events.events import PaymentFailed, PaymentSucceeded
-from apps.events.outbox import OutboxService
-from ..models import Payment, PaymentReversal
+from apps.payments.models import Payment, PaymentReversal
 from .balances import get_net_paid_amount, get_outstanding_amount
+
+from apps.bookings.interfaces import (
+    BookingInterfaceError,
+    get_booking_for_update,
+    get_booking
+)
+from apps.events.interfaces import EventsInterface, PaymentFailed, PaymentSucceeded
 
 logger = logging.getLogger(__name__)
 
@@ -25,19 +29,16 @@ class PaymentService:
     @staticmethod
     def _get_locked_booking(booking_id):
         try:
-            return (
-                Booking.objects.select_for_update()
-                .select_related("business")
-                .get(pk=booking_id)
-            )
-        except Booking.DoesNotExist:
+            return get_booking_for_update(booking_id=booking_id)
+
+        except BookingInterfaceError:
             raise ValidationError({
                 "booking": "The selected booking does not exist."
             })
 
     @staticmethod
     def _check_business_owner(*, booking, user):
-        if booking.business.owner_id != user.pk:
+        if booking.business_owner_id != user.pk:
             raise ValidationError({
                 "booking": (
                     "You are not authorized to manage payments for this booking"
@@ -63,10 +64,7 @@ class PaymentService:
                 user=recorded_by,
             )
 
-        if booking.status in [
-            Booking.Status.CANCELLED,
-            Booking.Status.COMPLETED,
-        ]:
+        if booking.status in {"cancelled", "completed"}:
             raise ValidationError({
                 "booking": (
                     "Payments cannot be added to a cancelled "
@@ -90,7 +88,7 @@ class PaymentService:
             })
 
         return Payment.objects.create(
-            booking=booking,
+            booking_id=booking.id,
             amount=amount,
             method=method,
             status=Payment.Status.PENDING,
@@ -151,18 +149,21 @@ class PaymentService:
         if new_status == Payment.Status.SUCCEEDED:
             event = PaymentSucceeded(
                 payment_id=payment.pk,
-                booking_id=booking.pk,
+                booking_id=booking.id,
                 customer_id=booking.customer_id,
                 amount=payment.amount,
             )
+
         else:
             event = PaymentFailed(
                 payment_id=payment.pk,
-                booking_id=booking.pk,
+                booking_id=booking.id,
                 customer_id=booking.customer_id,
                 amount=payment.amount,
             )
-        OutboxService.record_event(event)
+
+        EventsInterface.publish(event)
+
         return payment
 
     @staticmethod
@@ -213,6 +214,14 @@ class PaymentService:
 
     @staticmethod
     def get_booking_payment_summary(*, booking, user):
+        try:
+            booking = get_booking(booking_id=booking.id)
+
+        except BookingInterfaceError:
+            raise ValidationError({
+                "booking": "The selected booking does not exist."
+            })
+
         if booking.customer_id != user.pk:
             PaymentService._check_business_owner(booking=booking, user=user)
 
@@ -220,7 +229,7 @@ class PaymentService:
         outstanding = booking.price_at_booking - net_paid
 
         return {
-            "booking_id": booking.pk,
+            "booking_id": booking.id,
             "booking_price": booking.price_at_booking,
             "net_paid": net_paid,
             "outstanding_balance": max(outstanding, Decimal("0.00")),
