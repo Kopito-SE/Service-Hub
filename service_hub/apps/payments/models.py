@@ -1,8 +1,6 @@
-
 from django.conf import settings
 from django.db import models
 from django.db.models import Q
-
 
 class Payment(models.Model):
     class Method(models.TextChoices):
@@ -156,6 +154,4 @@ class PaymentReversal(models.Model):
 
     def __str__(self):
         return f"Reversal {self.pk} - Payment {self.payment_id}"
-
-
 
