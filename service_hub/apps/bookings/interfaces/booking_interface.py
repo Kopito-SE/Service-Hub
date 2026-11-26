@@ -13,7 +13,8 @@ from django.db.models import Q
 @dataclass(frozen=True)
 class BookingDTO:
     id: int
-    customer_id: int
+    customer_id: int | None
+    guest_customer_id: int | None
     business_id: int
     business_owner_id: int
     status: str
@@ -23,6 +24,7 @@ def _to_dto(booking):
     return BookingDTO(
         id=booking.pk,
         customer_id=booking.customer_id,
+        guest_customer_id=booking.guest_customer_id,
         business_id=booking.business_id,
         business_owner_id=booking.business.owner_id,
         status=booking.status,

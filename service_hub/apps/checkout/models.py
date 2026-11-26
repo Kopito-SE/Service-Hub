@@ -1,5 +1,6 @@
 import uuid
 from django.db import models
+from django.db.models import Q
 
 class Checkout(models.Model):
     class Status(models.TextChoices):
@@ -23,6 +24,11 @@ class Checkout(models.Model):
     # Nullable to support future guest checkout
     # This is an external user/customer identifier
     customer_id = models.PositiveBigIntegerField(
+        null=True,
+        blank=True
+    )
+
+    guest_customer_id = models.PositiveBigIntegerField(
         null=True,
         blank=True
     )
@@ -54,10 +60,26 @@ class Checkout(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    Q(
+                        customer_id__isnull=False,
+                        guest_customer_id__isnull=True,
+                    )
+                    | Q(
+                        customer_id__isnull=True,
+                        guest_customer_id__isnull=False,
+                    )
+                ),
+                name="checkout_one_customer_identity",
+            ),
+        ]
+
         indexes = [
             models.Index(
                 fields=["status", "expires_at"],
-                name="checkout_status_exp_idx"
+                name="checkout_status_exp_idx",
             ),
         ]
 
