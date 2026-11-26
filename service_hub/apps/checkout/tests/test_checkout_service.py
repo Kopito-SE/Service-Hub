@@ -19,6 +19,7 @@ class CheckoutServiceTests(TestCase):
         self.booking = SimpleNamespace(
             id=101,
             customer_id=25,
+            guest_customer_id=None,
             status="pending",
             price_at_booking=Decimal("1500.00"),
         )
