@@ -1,7 +1,4 @@
-
-
 from dataclasses import dataclass
-
 from django.core.exceptions import ValidationError
 
 from apps.customers.services import CustomerService
@@ -63,5 +60,19 @@ class CustomerInterface:
 
         return customer_dto, created
 
+    @staticmethod
+    def get_customer(*, customer_id: int) -> CustomerDTO:
+        try:
+            customer = CustomerService.get_customer(
+                customer_id=customer_id
+            )
 
+        except ValidationError as exc:
+            raise CustomerInterfaceError(exc.messages) from exc
 
+        return CustomerDTO(
+            id=customer.pk,
+            full_name=customer.full_name,
+            email=customer.email,
+            phone_number=customer.phone_number
+        )

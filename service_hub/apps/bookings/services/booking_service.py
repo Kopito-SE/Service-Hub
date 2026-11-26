@@ -24,19 +24,51 @@ from apps.events.interfaces import (
     BookingConfirmed
 )
 
+from apps.customers.interfaces import (
+    CustomerInterface,
+    CustomerInterfaceError
+)
+
 class BookingService:
 
     @staticmethod
     @transaction.atomic
     def create_booking(
         *,
-        customer,
+        customer=None,
+        guest_customer_id=None,
         business_id,
         service_id,
         start_time,
         staff_member_id=None,
         notes="",
     ):
+        # Validate customer identity
+        if (customer is None) == (guest_customer_id is None):
+            raise ValidationError({
+                "customer": (
+                    "Provide either a registered customer "
+                    "or a guest customer, but not both"
+                )
+            })
+
+        if guest_customer_id is not None and guest_customer_id <= 0:
+            raise ValidationError({
+                "guest_customer_id": "Invalid guest customer ID."
+            })
+
+        if guest_customer_id is not None:
+            try:
+                CustomerInterface.get_customer(
+                    customer_id=guest_customer_id
+                )
+
+            except CustomerInterfaceError as exc:
+                raise ValidationError({
+                    "guest_customer_id": str(exc)
+                }) from exc
+
+
         # 1. Lock and retrieve the business through its public interface.
         try:
             business = BusinessInterface.get_business_for_update(
@@ -102,6 +134,7 @@ class BookingService:
         # We no longer have Business or StaffMember model instances.
         booking = Booking.objects.create(
             customer=customer,
+            guest_customer_id=guest_customer_id,
             business_id=business_id,
             service_id=service_id,
             staff_member_id=staff_member_id,
@@ -129,6 +162,7 @@ class BookingService:
         event = BookingCreated(
             booking_id=booking.pk,
             customer_id=booking.customer_id,
+            guest_customer_id=booking.guest_customer_id,
             service_name=str(booking.service),
         )
         try:
@@ -171,6 +205,7 @@ class BookingService:
         event = BookingCancelled(
             booking_id=booking.pk,
             customer_id=booking.customer_id,
+            guest_customer_id=booking.guest_customer_id,
             service_name=str(booking.service),
         )
         try:
@@ -192,7 +227,7 @@ class BookingService:
             booking = (
                 Booking.objects
                 .select_for_update()
-                .select_related("services")
+                .select_related("service")
                 .get(pk=booking_id)
             )
 
@@ -216,6 +251,7 @@ class BookingService:
         event = BookingConfirmed(
             booking_id=booking.pk,
             customer_id=booking.customer_id,
+            guest_customer_id=booking.guest_customer_id,
             service_name=str(booking.service)
         )
         try:

@@ -98,3 +98,12 @@ class CustomerService:
         )
 
         return customer, True
+    @staticmethod
+    def get_customer(*, customer_id: int):
+        try:
+            return Customer.objects.get(pk=customer_id)
+
+        except Customer.DoesNotExist as exc:
+            raise ValidationError({
+                "customer_id": "The guest customer does not exist."
+            }) from exc

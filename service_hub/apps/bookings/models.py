@@ -12,7 +12,14 @@ class Booking(models.Model):
     customer = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
-        related_name="service_hub_bookings"
+        related_name="service_hub_bookings",
+        null=True,
+        blank=True,
+    )
+
+    guest_customer_id = models.PositiveBigIntegerField(
+        null=True,
+        blank=True
     )
 
     business = models.ForeignKey(
@@ -67,12 +74,31 @@ class Booking(models.Model):
                 condition=Q(end_time__gt=F("start_time")),
                 name="booking_end_after_start"
             ),
+            models.CheckConstraint(
+                condition=(
+                    Q(
+                        customer__isnull=False,
+                        guest_customer_id__isnull=True
+                    )
+                    | Q(
+                        customer__isnull=True,
+                        guest_customer_id__isnull=False
+                    )
+                ),
+                name="booking_one_customer_identity"
+            ),
         ]
         indexes = [
             models.Index(
                 fields=["customer", "start_time"],
                 name="booking_customer_time_idx",
             ),
+
+            models.Index(
+                fields=["guest_customer_id", "start_time"],
+                name="booking_guest_time_idx"
+            ),
+
             models.Index(
                 fields=["business", "start_time", "status"],
                 name="booking_business_time_idx",
