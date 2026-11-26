@@ -14,6 +14,12 @@ class BookingCancelled:
     service_name: str
 
 @dataclass(frozen=True)
+class BookingConfirmed:
+    booking_id: int
+    customer_id: int
+    service_name: str
+
+@dataclass(frozen=True)
 class PaymentSucceeded:
     payment_id: int
     booking_id: int

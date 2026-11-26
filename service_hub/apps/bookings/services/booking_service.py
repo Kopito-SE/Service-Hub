@@ -1,4 +1,3 @@
-
 from datetime import timedelta
 
 from django.db import transaction
@@ -11,7 +10,7 @@ from apps.businesses.interfaces import (
 )
 from apps.service_catalog.interfaces import ServiceInterface, ServiceInterfaceError
 
-from .models import Booking
+from apps.bookings.models import Booking
 from apps.availability.interfaces import (
     AvailabilityInterface,
     AvailabilityInterfaceError,
@@ -21,7 +20,8 @@ from apps.events.interfaces import (
     EventsInterface,
     EventsInterfaceError,
     BookingCreated,
-    BookingCancelled
+    BookingCancelled,
+    BookingConfirmed
 )
 
 class BookingService:
@@ -183,3 +183,78 @@ class BookingService:
 
         return booking
 
+    @staticmethod
+    @transaction.atomic
+    def confirm_booking(*, booking_id):
+        """Confirm a pending booking after Checkout is fully settled."""
+
+        try:
+            booking = (
+                Booking.objects
+                .select_for_update()
+                .select_related("services")
+                .get(pk=booking_id)
+            )
+
+        except Booking.DoesNotExist:
+            raise ValidationError({
+                "booking": "Booking does not exist."
+            })
+
+        # Idempotency: repeated confirmation is safe:
+        if booking.status == Booking.Status.CONFIRMED:
+            return booking
+
+        if booking.status != Booking.Status.PENDING:
+            raise ValidationError({
+                "status": "Only pending bookings can be confirmed."
+            })
+
+        booking.status = Booking.Status.CONFIRMED
+        booking.save(update_fields=["status", "updated_at"])
+
+        event = BookingConfirmed(
+            booking_id=booking.pk,
+            customer_id=booking.customer_id,
+            service_name=str(booking.service)
+        )
+        try:
+            EventsInterface.publish(event)
+        except EventsInterfaceError as exc:
+            raise ValidationError({
+                "event": str(exc)
+            }) from exc
+
+        return booking
+
+    @staticmethod
+    @transaction.atomic
+    def expire_pending_booking(*, booking_id):
+        """
+        Expire a pending booking and release its reservation
+        """
+        try:
+            booking = (
+                Booking.objects
+                .select_for_update()
+                .get(pk=booking_id)
+            )
+
+        except Booking.DoesNotExist:
+            raise ValidationError({
+                "booking": "Booking does not exist"
+            })
+        # A Booking already cancelled needs no further action.
+        if booking.status == Booking.Status.CANCELLED:
+            return booking
+
+        if booking.status != Booking.Status.PENDING:
+            raise ValidationError({
+                "status": "Only pending bookings can expire."
+            })
+
+        # Reuse the existing cancellation workflow:
+        # Status change, reservation release and event publishing
+        return BookingService.cancel_booking(
+            booking=booking
+        )

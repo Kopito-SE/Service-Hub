@@ -3,7 +3,11 @@ from decimal import Decimal
 from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
-
+from apps.bookings.interfaces import (
+    BookingInterfaceError,
+    confirm_booking,
+    expire_pending_booking
+)
 from apps.checkout.models import Checkout
 from apps.payments.interfaces import (
     PaymentInterfaceError,
@@ -40,16 +44,27 @@ class SettlementService:
         }:
             return checkout
 
-        # A completed Checkout stays completed.
-        # Any later reversal requires a separate reconciliation/
-        # refund workflow rather than reopening Checkout.
+        # Completed Checkout is idempotent.
         if checkout.status == Checkout.Status.COMPLETED:
             return checkout
 
         # Expire the Checkout when its fixed deadline has passed.
         if timezone.now() >= checkout.expires_at:
+            try:
+                expire_pending_booking(
+                    booking_id=checkout.booking_id
+                )
+
+            except BookingInterfaceError as exc:
+                raise ValidationError(
+                    "Unable to expire the pending booking"
+                ) from exc
+
             checkout.status = Checkout.Status.EXPIRED
-            checkout.save(update_fields=["status", "updated_at"])
+            checkout.save(
+                update_fields=["status", "updated_at"]
+            )
+
             return checkout
 
         try:
@@ -86,6 +101,17 @@ class SettlementService:
         outstanding = checkout.amount_due - net_paid
 
         if outstanding == Decimal("0.00"):
+            try:
+                confirm_booking(
+                    booking_id=checkout.booking_id
+                )
+
+            except BookingInterfaceError as exc:
+                raise ValidationError(
+                    "Payment is settled, but the booking"
+                    "could not be confirmed"
+                ) from exc
+
             checkout.status = Checkout.Status.COMPLETED
             checkout.completed_at = timezone.now()
 

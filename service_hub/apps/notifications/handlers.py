@@ -1,4 +1,3 @@
-
 from django.contrib.auth import get_user_model
 
 from apps.notifications.services import NotificationService
@@ -84,6 +83,20 @@ def handle_booking_cancelled(event, *, delivery_id=None):
             "has been cancelled."
         ),
         delivery_id=delivery_id,
+    )
+
+def handle_booking_confirmed(event, *, delivery_id=None):
+    customer = User.objects.get(pk=event.customer_id)
+
+    _notify_customer(
+        customer=customer,
+        event_type=Notification.EventType.BOOKING_CONFIRMED,
+        subject="Booking Confirmed",
+        message=(
+            f"Your booking for {event.service_name} "
+            "has been confirmed"
+        ),
+        delivery_id=delivery_id
     )
 
 

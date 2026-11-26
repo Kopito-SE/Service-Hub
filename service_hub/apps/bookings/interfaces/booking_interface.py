@@ -1,8 +1,10 @@
 from dataclasses import dataclass
 from decimal import Decimal
-
+from apps.bookings.services.booking_service import BookingService
 from django.db import connection
 from apps.bookings.models import Booking
+from rest_framework.exceptions import ValidationError
+
 
 class BookingInterfaceError(Exception):
     """Raised when a booking cannot be retrieved through the public interface"""
@@ -69,3 +71,28 @@ def get_accessible_booking_ids(*, user_id):
         Q(business__owner_id=user_id) | Q(customer_id=user_id)
       ).values_list("id", flat=True)
     )
+
+def confirm_booking(*, booking_id):
+    """Confirm a booking through the public interface."""
+    try:
+        booking = BookingService.confirm_booking(
+            booking_id=booking_id
+        )
+
+    except ValidationError as exc:
+        raise BookingInterfaceError(str(exc)) from exc
+
+    return _to_dto(booking)
+
+def expire_pending_booking(*, booking_id):
+    """
+    Expire a pending booking through the public interface
+    """
+    try:
+        booking = BookingService.expire_pending_booking(
+            booking_id=booking_id
+        )
+    except ValidationError as exc:
+        raise BookingInterfaceError(str(exc)) from exc
+
+    return _to_dto(booking)

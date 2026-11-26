@@ -64,8 +64,9 @@ class SettlementServiceTests(TestCase):
         self.assertIsNone(checkout.completed_at)
 
     # 3.
+    @patch("apps.checkout.services.settlement_service.confirm_booking")
     @patch("apps.checkout.services.settlement_service.get_payment_summary")
-    def test_full_payment_completes_checkout(self, mock_summary):
+    def test_full_payment_completes_checkout(self, mock_summary, mock_confirm_booking):
         mock_summary.return_value = self.make_summary("1500.00")
 
         checkout = SettlementService.refresh_checkout_status(
@@ -75,6 +76,9 @@ class SettlementServiceTests(TestCase):
 
         self.assertEqual(checkout.status, Checkout.Status.COMPLETED)
         self.assertIsNotNone(checkout.completed_at)
+        mock_confirm_booking.assert_called_once_with(
+            booking_id=self.checkout.booking_id
+        )
 
     # 4.
     @patch("apps.checkout.services.settlement_service.get_payment_summary")
@@ -121,11 +125,10 @@ class SettlementServiceTests(TestCase):
             )
 
     # 7.
+    @patch("apps.checkout.services.settlement_service.expire_pending_booking")
     @patch("apps.checkout.services.settlement_service.get_payment_summary")
-    def test_expired_checkout_is_marked_expired(self, mock_summary):
-        self.checkout.expires_at = timezone.now() - timezone.timedelta(
-            seconds=1
-        )
+    def test_expired_checkout_is_marked_expired(self, mock_summary, mock_expire_booking):
+        self.checkout.expires_at = timezone.now() - timezone.timedelta(seconds=1)
         self.checkout.save(update_fields=["expires_at"])
 
         checkout = SettlementService.refresh_checkout_status(
@@ -134,6 +137,9 @@ class SettlementServiceTests(TestCase):
         )
 
         self.assertEqual(checkout.status, Checkout.Status.EXPIRED)
+        mock_expire_booking.assert_called_once_with(
+            booking_id=self.checkout.booking_id
+        )
         mock_summary.assert_not_called()
 
     # 8.

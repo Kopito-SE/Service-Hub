@@ -11,7 +11,7 @@ from apps.service_catalog.interfaces import (
 )
 
 from .models import Booking
-from .services import BookingService
+from apps.bookings.services import BookingService
 
 
 class BookingSerializer(serializers.ModelSerializer):

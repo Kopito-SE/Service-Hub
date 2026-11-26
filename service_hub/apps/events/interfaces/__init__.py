@@ -5,6 +5,7 @@ from .event_interface import (
 
 from apps.events.events import (
     BookingCreated,
+    BookingConfirmed,
     BookingCancelled,
     PaymentSucceeded,
     PaymentFailed
@@ -14,6 +15,7 @@ __all__ = [
     "EventsInterface",
     "EventsInterfaceError",
     "BookingCreated",
+    "BookingConfirmed"
     "BookingCancelled",
     "PaymentSucceeded",
     "PaymentFailed"
