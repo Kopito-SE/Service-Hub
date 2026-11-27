@@ -33,6 +33,12 @@ class Checkout(models.Model):
         blank=True
     )
 
+    guest_access_token_hash = models.CharField(
+        max_length=64,
+        null=True,
+        blank=True
+    )
+
     # Snapshot of the amount that must be settled
     amount_due = models.DecimalField(
         max_digits=12,
@@ -66,13 +72,15 @@ class Checkout(models.Model):
                     Q(
                         customer_id__isnull=False,
                         guest_customer_id__isnull=True,
+                        guest_access_token_hash__isnull=True,
                     )
                     | Q(
                         customer_id__isnull=True,
                         guest_customer_id__isnull=False,
+                        guest_access_token_hash__isnull=False
                     )
                 ),
-                name="checkout_one_customer_identity",
+                name="checkout_identity_and_guest_token",
             ),
         ]
 

@@ -1,4 +1,3 @@
-
 from datetime import timedelta
 from decimal import Decimal
 from types import SimpleNamespace
@@ -31,12 +30,12 @@ class CheckoutServiceTests(TestCase):
 
         before_creation = timezone.now()
 
-        checkout = CheckoutService.create_checkout(
-            booking_id=self.booking.id
-        )
+        result = CheckoutService.create_checkout(booking_id=self.booking.id)
+        checkout = result.checkout
 
         after_creation = timezone.now()
 
+        self.assertIsNone(result.guest_access_token)
         self.assertEqual(checkout.booking_id, self.booking.id)
         self.assertEqual(checkout.customer_id, self.booking.customer_id)
         self.assertEqual(checkout.amount_due, Decimal("1500.00"))
@@ -93,7 +92,7 @@ class CheckoutServiceTests(TestCase):
     def test_duplicate_checkout_is_rejected(self, mock_get_booking):
         mock_get_booking.return_value = self.booking
 
-        first_checkout = CheckoutService.create_checkout(
+        first_result = CheckoutService.create_checkout(
             booking_id=self.booking.id
         )
 
@@ -105,5 +104,5 @@ class CheckoutServiceTests(TestCase):
         self.assertEqual(Checkout.objects.count(), 1)
         self.assertEqual(
             Checkout.objects.first().id,
-            first_checkout.id,
+            first_result.checkout.id,
         )
