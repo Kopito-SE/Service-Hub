@@ -1,6 +1,4 @@
-
 from rest_framework import serializers
-
 from apps.businesses.interfaces import (
     BusinessInterface,
     BusinessInterfaceError,

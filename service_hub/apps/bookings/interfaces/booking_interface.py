@@ -31,6 +31,36 @@ def _to_dto(booking):
         price_at_booking=booking.price_at_booking
     )
 
+def create_booking(
+        *,
+        customer=None,
+        guest_customer_id=None,
+        business_id,
+        service_id,
+        start_time,
+        staff_member_id=None,
+        notes=""
+):
+    """
+    Create a booking through the public Interface.
+    Support registered and guest customers
+    """
+    try:
+        booking = BookingService.create_booking(
+            customer=customer,
+            guest_customer_id=guest_customer_id,
+            business_id=business_id,
+            service_id=service_id,
+            start_time=start_time,
+            staff_member_id=staff_member_id,
+            notes=notes
+        )
+    except ValidationError as exc:
+        raise BookingInterfaceError(str(exc)) from exc
+
+    return _to_dto(booking)
+
+
 def get_booking(*, booking_id):
     try:
         booking = Booking.objects.select_related("business").get(
@@ -98,3 +128,5 @@ def expire_pending_booking(*, booking_id):
         raise BookingInterfaceError(str(exc)) from exc
 
     return _to_dto(booking)
+
+
