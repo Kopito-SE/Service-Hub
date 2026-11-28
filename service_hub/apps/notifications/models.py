@@ -34,7 +34,15 @@ class Notification(models.Model):
     recipient = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
-        related_name="notifications"
+        related_name="notifications",
+        null=True,
+        blank=True
+    )
+
+    recipient_email = models.EmailField(
+        max_length=254,
+        null=True,
+        blank=True
     )
     channel = models.CharField(
         max_length=20,
@@ -68,7 +76,26 @@ class Notification(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        channel="in_app",
+                        recipient__isnull=False,
+                        recipient_email__isnull=True
+                    )
+                    |
+                    models.Q(
+                        channel="email",
+                        recipient_email__isnull=False
+                    )
+                ),
+                name="notification_recipient_channel_valid",
+            ),
+        ]
+
         ordering = ["-created_at"]
+
         indexes = [
             models.Index(
                 fields=["recipient", "status"],

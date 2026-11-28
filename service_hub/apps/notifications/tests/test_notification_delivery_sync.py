@@ -1,4 +1,3 @@
-
 from django.test import TestCase
 from  django.contrib.auth import get_user_model
 from django.utils import timezone
@@ -19,7 +18,8 @@ class NotificationDeliverySyncTests(TestCase):
         )
         self.notification = Notification.objects.create(
             recipient=self.customer,
-            channel=Notification.EventType.BOOKING_CREATED,
+            channel=Notification.Channel.EMAIL,
+            recipient_email=self.customer.email,
             subject="Booking received",
             message="Your booking has been received.",
             status=Notification.Status.PENDING

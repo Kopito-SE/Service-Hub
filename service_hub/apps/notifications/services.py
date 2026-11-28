@@ -8,19 +8,27 @@ from apps.notifications.email.policies import can_send_email
 class NotificationService:
     """
     Public service interface for creating notifications.
-    Other components should use this service instead of
-    creating Notification objects directly.
+
+    Supports both registered customers and guest customers.
+
+    Registered customers:
+        - IN_APP notifications
+        - EMAIL notifications
+
+    Guest customers:
+        - EMAIL notifications only
     """
     @staticmethod
     @transaction.atomic
     def create_notification(
-            recipient,
-            event_type,
-            subject,
-            message,
+            recipient=None,
+            event_type=None,
+            subject=None,
+            message=None,
             channel=Notification.Channel.IN_APP,
             idempotency_key=None,
-            severity=Notification.Severity.INFO
+            severity=Notification.Severity.INFO,
+            recipient_email=None
     ):
         # Validate the requested channel
         if channel not in Notification.Channel.values:
@@ -34,28 +42,47 @@ class NotificationService:
         if severity not in Notification.Severity.values:
             raise ValueError(f"Unsupported notification severity: {severity}")
 
-        # Validate email Eligibility
-        if channel == Notification.Channel.EMAIL:
-
-            if not can_send_email(event_type, severity):
-                raise ValueError(
-                    "This notification type or severity "
-                    "does not support email delivery."
-                )
-
-            if not recipient.email:
-                raise ValueError("Recipient does not have an email address.")
-
+        # Resolve the destination email.
+        resolved_email = (
+            recipient_email or getattr(recipient, "email", None)
+        )
 
         if channel == Notification.Channel.IN_APP:
+            if recipient is None:
+                raise ValueError(
+                    "In-app notifications require a registered user."
+                )
+
+            if recipient_email is not None:
+                raise ValueError(
+                    "recipient_email is only supported for email notifications."
+                )
+
             status = Notification.Status.SENT
             sent_at = timezone.now()
+
+        # Validate email Notification
         else:
+            if not can_send_email(event_type, severity):
+                raise ValueError(
+                    "This notification type or severity does not support email delivery"
+                )
+
+            if not resolved_email:
+                raise ValueError(
+                    "An email address required for email notification."
+                )
+
             status = Notification.Status.PENDING
             sent_at = None
 
         fields = {
             "recipient": recipient,
+            "recipient_email": (
+                resolved_email
+                if channel == Notification.Channel.EMAIL
+                else None
+            ),
             "channel": channel,
             "event_type": event_type,
             "subject": subject,

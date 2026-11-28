@@ -151,6 +151,7 @@ class PaymentService:
                 payment_id=payment.pk,
                 booking_id=booking.id,
                 customer_id=booking.customer_id,
+                guest_customer_id=booking.guest_customer_id,
                 amount=payment.amount,
             )
 
@@ -159,6 +160,7 @@ class PaymentService:
                 payment_id=payment.pk,
                 booking_id=booking.id,
                 customer_id=booking.customer_id,
+                guest_customer_id=booking.guest_customer_id,
                 amount=payment.amount,
             )
 
